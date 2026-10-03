@@ -1,6 +1,7 @@
 import { CapacitorHttp } from '@capacitor/core';
 import { all, isoNow, json, nextRevision, one, run, uid } from './db.js';
 import { queueAndSend } from './sync.js';
+import { AUTO_SAFE_CATEGORIES, canAutoSend } from '../shared/policy.js';
 
 export type AutomationAction =
   | 'no_action' | 'draft_reply' | 'send_reply' | 'schedule_followup'
@@ -17,15 +18,6 @@ export interface AutomationDecision {
   sensitive: boolean;
   unsubscribe: boolean;
 }
-
-const ALWAYS_HUMAN = new Set([
-  'legal', 'regulatory', 'complaint', 'payment_dispute', 'security',
-  'privacy', 'medical', 'employment', 'contract', 'fraud',
-]);
-const AUTO_SAFE = new Set([
-  'general_enquiry', 'availability', 'acknowledgement', 'partnership_initial',
-  'supplier_initial', 'support_routine', 'bd_interest', 'bd_not_interested',
-]);
 
 async function setting(key: string): Promise<string | null> {
   return (await one<{ value: string }>('SELECT value FROM settings WHERE key=?', [key]))?.value || null;
@@ -119,14 +111,16 @@ export async function evaluateInbound(messageId: string): Promise<AutomationDeci
 
   const threshold = Number(rule.confidence_threshold || 0.92);
   const mode = String(rule.mode || 'draft');
-  const autoAllowed =
-    mode === 'auto_safe' &&
-    decision.confidence >= threshold &&
-    !decision.sensitive &&
-    !ALWAYS_HUMAN.has(decision.category) &&
-    AUTO_SAFE.has(decision.category) &&
-    decision.action === 'send_reply' &&
-    (await replyCountLastHour()) < Number(rule.max_auto_replies_per_hour || 10);
+  const autoAllowed = canAutoSend({
+    mode,
+    category: decision.category,
+    sensitive: decision.sensitive,
+    confidence: decision.confidence,
+    threshold,
+    action: decision.action,
+    sentLastHour: await replyCountLastHour(),
+    hourlyLimit: Number(rule.max_auto_replies_per_hour || 10),
+  });
 
   if (autoAllowed && decision.body.trim()) {
     try {
@@ -270,7 +264,7 @@ export async function createDefaultRule():Promise<string>{
   const id=uid('rule_'), now=isoNow();
   await run(
     'INSERT INTO automation_rules(id,name,enabled,mode,confidence_threshold,categories_json,max_auto_replies_per_hour,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
-    [id,'Default safe automation',1,'draft',0.92,JSON.stringify([...AUTO_SAFE]),10,now,now],
+    [id,'Default safe automation',1,'draft',0.92,JSON.stringify([...AUTO_SAFE_CATEGORIES]),10,now,now],
   );
   return id;
 }
