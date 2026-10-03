@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Folder, Identity, MessageDetail, MessageSummary, Status, ThreadDetail } from '../shared/types.js';
+import { mailApi as api, openAttachment } from './mailApi.js';
+import { SettingsPanel } from './SettingsPanel.js';
 
 type Draft = {
   id:string; replyToMessageId:string|null; fromIdentity:string; to:string[]; cc:string[]; bcc:string[];
@@ -17,15 +19,6 @@ const folders: {id:Folder; label:string; icon:string}[] = [
   {id:'trash',label:'Trash',icon:'♲'},
 ];
 
-async function api<T>(url:string, init?:RequestInit):Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: {'Content-Type':'application/json', ...(init?.headers||{})},
-  });
-  const data = await response.json().catch(()=>({}));
-  if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
-  return data as T;
-}
 const csv = (value:string) => value.split(',').map(v=>v.trim()).filter(Boolean);
 const niceDate = (value:string|null|undefined) => {
   if (!value) return '';
@@ -48,6 +41,7 @@ function App() {
   const [compose,setCompose] = useState<ComposeState|null>(null);
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState<string|null>(null);
+  const [settingsOpen,setSettingsOpen] = useState(false);
   const draftTimer = useRef<number|null>(null);
 
   const refreshStatus = useCallback(async()=>setStatus(await api<Status>('/api/status')),[]);
@@ -157,7 +151,7 @@ function App() {
     <main className="mail">
       <header>
         <div className="search"><span>⌕</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search mail"/></div>
-        <button className="iconBtn" onClick={runSync} disabled={busy} title="Sync now">{busy||status?.syncing?'◌':'↻'}</button>
+        <button className="iconBtn" onClick={()=>setSettingsOpen(true)} title="Settings">⚙</button><button className="iconBtn" onClick={runSync} disabled={busy} title="Sync now">{busy||status?.syncing?'◌':'↻'}</button>
       </header>
       {error&&<div className="notice">{error}<button onClick={()=>setError(null)}>×</button></div>}
       <div className="content">
@@ -191,7 +185,7 @@ function App() {
           <div className="threadMessages">{thread.messages.map(m=><article className="emailCard" key={m.id}>
             <div className="emailMeta"><div className="avatar">{initials(m.fromName||m.fromAddress)}</div><div className="sender"><b>{m.fromName||m.fromAddress}</b><span>&lt;{m.fromAddress}&gt;</span><small>to {m.toAddresses.join(', ')}</small></div><time>{new Date(m.createdAt).toLocaleString()}</time></div>
             {m.htmlBody ? <iframe title={m.subject} sandbox="" srcDoc={m.htmlBody}/> : <div className="plainBody">{m.textBody||'(empty message)'}</div>}
-            {!!m.attachments.length&&<div className="attachments">{m.attachments.map(a=><a key={a.id} href={`/api/attachments/${a.id}`}><span>▧</span><div><b>{a.filename}</b><small>{a.sizeBytes?formatBytes(a.sizeBytes):a.contentType}</small></div></a>)}</div>}
+            {!!m.attachments.length&&<div className="attachments">{m.attachments.map(a=><button className="attachmentButton" key={a.id} onClick={()=>void openAttachment(a.id)}><span>▧</span><div><b>{a.filename}</b><small>{a.sizeBytes?formatBytes(a.sizeBytes):a.contentType}</small></div></button>)}</div>}
             <div className="emailActions"><button onClick={()=>reply(m)}>↩ Reply</button></div>
           </article>)}</div>
         </section>}
@@ -202,12 +196,12 @@ function App() {
   </div>
 }
 
-function Empty({label}:{label:string}) { return <div className="empty"><div>✉</div><b>{label}</b><span>GIBP Mail stores your mailbox locally on this computer.</span></div>; }
+function Empty({label}:{label:string}) { return <div className="empty"><div>✉</div><b>{label}</b><span>GIBP Mail stores your mailbox locally on this device.</span></div>; }
 
 function Compose({value,identities,busy,onChange,onClose,onSend}:{value:ComposeState;identities:Identity[];busy:boolean;onChange:(v:ComposeState)=>void;onClose:()=>void;onSend:()=>void}) {
   return <div className="compose">
     <div className="composeHead"><b>{value.replyToMessageId?'Reply':'New message'}</b><button onClick={onClose}>×</button></div>
-    <div className="field"><label>From</label><select value={value.from} onChange={e=>onChange({...value,from:e.target.value})}>{identities.map(i=><option key={i.address} value={i.address}>{i.formatted}</option>)}</select></div>
+    <div className="field"><label>From</label><input list="gibp-from-identities" value={value.from} onChange={e=>onChange({...value,from:e.target.value.trim()})} placeholder="name@verified-domain"/><datalist id="gibp-from-identities">{identities.map(i=><option key={i.address} value={i.address}>{i.formatted}</option>)}</datalist></div>
     <div className="field"><label>To</label><input autoFocus value={value.to} onChange={e=>onChange({...value,to:e.target.value})} placeholder="name@example.com"/></div>
     <details><summary>Cc / Bcc</summary><div className="field"><label>Cc</label><input value={value.cc} onChange={e=>onChange({...value,cc:e.target.value})}/></div><div className="field"><label>Bcc</label><input value={value.bcc} onChange={e=>onChange({...value,bcc:e.target.value})}/></div></details>
     <input className="subject" value={value.subject} onChange={e=>onChange({...value,subject:e.target.value})} placeholder="Subject"/>
