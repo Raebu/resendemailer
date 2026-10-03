@@ -101,6 +101,15 @@ async function saveMessage(account: MobileAccount, value: any, direction: 'inbou
   return id;
 }
 
+function bytesToBase64(bytes:Uint8Array):string{
+  let binary='';
+  const chunk=0x8000;
+  for(let i=0;i<bytes.length;i+=chunk){
+    binary+=String.fromCharCode(...bytes.subarray(i,Math.min(i+chunk,bytes.length)));
+  }
+  return btoa(binary);
+}
+
 function safeName(value: string): string {
   return value.replace(/[^a-zA-Z0-9._ -]/g, '_').slice(0, 160) || 'attachment';
 }
@@ -115,11 +124,26 @@ async function saveInboundAttachments(account: MobileAccount, providerEmailId: s
       let localPath: string | null = null;
       let size = Number(item.size || 0) || null;
       try {
-        const detailRaw = await mobileResend.getReceivedAttachment(account, providerEmailId, item.id);
-        const detail = detailRaw?.data || detailRaw;
-        const base64 = detail?.content || detail?.base64 || null;
+        let downloadUrl = item.download_url || item.downloadUrl || null;
+        let detail:any = null;
+        if (!downloadUrl) {
+          const detailRaw = await mobileResend.getReceivedAttachment(account, providerEmailId, item.id);
+          detail = detailRaw?.data || detailRaw;
+          downloadUrl = detail?.download_url || detail?.downloadUrl || null;
+        }
+        let base64:string|null = detail?.content || detail?.base64 || null;
+        if (!base64 && downloadUrl) {
+          const response = await fetch(downloadUrl);
+          if (!response.ok) throw new Error(`Attachment HTTP ${response.status}`);
+          const declared = Number(response.headers.get('content-length') || 0);
+          if (declared > 26_214_400) throw new Error('Attachment exceeds 25 MiB local limit');
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          if (bytes.length > 26_214_400) throw new Error('Attachment exceeds 25 MiB local limit');
+          base64 = bytesToBase64(bytes);
+          size = bytes.length;
+        }
         if (typeof base64 === 'string' && base64.length) {
-          const rel = `attachments/${localMessageId}/${attachmentId}-${safeName(item.filename || detail.filename || 'attachment')}`;
+          const rel = `attachments/${localMessageId}/${attachmentId}-${safeName(item.filename || detail?.filename || 'attachment')}`;
           await Filesystem.writeFile({ path: rel, data: base64, directory: Directory.Data, recursive: true });
           const uri = await Filesystem.getUri({ path: rel, directory: Directory.Data });
           localPath = uri.uri;
