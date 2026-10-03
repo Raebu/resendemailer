@@ -4,6 +4,7 @@ import { mobileResend, type MobileAccount } from './resend.js';
 import { accountForSender, flushMobileOutbox, refreshDomains, queueAndSend, syncAllAccounts } from './sync.js';
 import { configureAi, createDefaultRule, evaluateInbound, reconcileCampaignReplies, runCampaignTick } from './automation.js';
 import { pushAllReplicas, pushReplicaTarget } from './replica.js';
+import { configureBackgroundAccount, removeBackgroundAccount, triggerBackgroundMailboxSync } from './background.js';
 
 let syncing=false;
 const parseBody=(init:RequestInit):any=>{
@@ -69,6 +70,7 @@ async function addAccount(body:any):Promise<any>{
   await mobileResend.listDomains(account);
   await run('INSERT INTO accounts(id,name,api_key,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?)',[id,name,apiKey,1,now,now]);
   await refreshDomains(account);
+  await configureBackgroundAccount(account);
   return{id,name,enabled:true};
 }
 
@@ -126,6 +128,9 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
   if(path==='/api/identities'&&method==='GET')return await listIdentities() as T;
   if(path==='/api/sync'&&method==='POST'){
     if(syncing)return {inbound:0,sent:0} as T;
+    const bgAccounts=await all<MobileAccount>('SELECT * FROM accounts WHERE enabled=1');
+    for(const account of bgAccounts){try{await configureBackgroundAccount(account);}catch{/* foreground sync still works */}}
+    try{await triggerBackgroundMailboxSync();}catch{/* WorkManager best effort */}
     syncing=true;
     try{
       const result=await syncAllAccounts();
@@ -182,7 +187,10 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
   if(path==='/api/accounts'&&method==='GET')return await accountsPublic() as T;
   if(path==='/api/accounts'&&method==='POST')return await addAccount(body) as T;
   if(path.startsWith('/api/accounts/')&&method==='DELETE'){
-    const id=decodeURIComponent(path.split('/').pop()!);await run('UPDATE accounts SET enabled=0,updated_at=? WHERE id=?',[isoNow(),id]);return{ok:true} as T;
+    const id=decodeURIComponent(path.split('/').pop()!);
+    await run('UPDATE accounts SET enabled=0,updated_at=? WHERE id=?',[isoNow(),id]);
+    try{await removeBackgroundAccount(id);}catch{/* encrypted foreground account remains disabled */}
+    return{ok:true} as T;
   }
   const domainRefresh=path.match(/^\/api\/accounts\/([^/]+)\/domains\/refresh$/);
   if(domainRefresh&&method==='POST'){
