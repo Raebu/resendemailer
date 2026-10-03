@@ -67,7 +67,7 @@ export default {
       headers:{Authorization:`Bearer ${env.OPENAI_API_KEY}`,'Content-Type':'application/json'},
       body:JSON.stringify(payload),
     });
-    const raw=await upstream.json<any>();
+    const raw:any=await upstream.json();
     if(!upstream.ok) return Response.json({error:raw?.error?.message||'OpenAI request failed'},{status:502});
     try{
       const result=JSON.parse(extractText(raw));
