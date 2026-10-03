@@ -1,20 +1,29 @@
 {
   "name": "gibp-mail",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Local-first GIBP email client backed by Resend",
+  "description": "Phone-primary, local-first multi-account email client powered by Resend",
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"tsx watch src/server/index.ts\"",
     "start": "NODE_ENV=production tsx src/server/index.ts",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run build"
+    "test": "tsx --test tests/*.test.ts",
+    "check": "npm run typecheck && npm run test && npm run build",
+    "android:add": "npm run build && npx cap add android && bash scripts/apply-android-overlay.sh && npx cap sync android",
+    "android:sync": "npm run build && bash scripts/apply-android-overlay.sh && npx cap sync android",
+    "android:debug": "npm run android:sync && cd android && ./gradlew assembleDebug"
   },
-  "engines": {
-    "node": ">=22"
-  },
+  "engines": { "node": ">=22" },
   "dependencies": {
+    "@capacitor-community/sqlite": "^8.1.1",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/background-runner": "^2.1.1",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/filesystem": "^8.0.0",
+    "@capacitor/local-notifications": "^8.0.0",
+    "@capacitor/network": "^8.0.0",
     "better-sqlite3": "^12.4.1",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
@@ -22,6 +31,8 @@
     "zod": "^4.1.11"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/cli": "^8.0.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.3",
     "@types/node": "^24.7.0",
