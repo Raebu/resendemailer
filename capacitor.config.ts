@@ -16,14 +16,6 @@ const config: CapacitorConfig = {
         biometricSubTitle: 'Authenticate to access encrypted mail',
       },
     },
-    BackgroundRunner: {
-      label: 'global.gibp.mail.background',
-      src: 'runners/mail-sync.js',
-      event: 'gibpMailSync',
-      repeat: true,
-      interval: 15,
-      autoStart: true,
-    },
     LocalNotifications: {
       smallIcon: 'ic_stat_gibp_mail',
       iconColor: '#C9A852',
