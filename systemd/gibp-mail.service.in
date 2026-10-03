@@ -1,0 +1,29 @@
+[Unit]
+Description=GIBP Mail local-first Resend client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@WORKDIR@
+Environment=NODE_ENV=production
+EnvironmentFile=%h/.config/gibp-mail/mail.env
+ExecStart=/usr/bin/env npm start
+Restart=on-failure
+RestartSec=5
+
+# Keep the service local and reduce accidental privilege.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/gibp-mail
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+
+[Install]
+WantedBy=default.target
