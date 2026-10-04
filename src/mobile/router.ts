@@ -96,11 +96,17 @@ async function importBackgroundAutomationState():Promise<void>{
 
   for(const entry of Array.isArray(state?.audit)?state.audit:[]){
     if(!entry?.id||!entry?.action||!entry?.createdAt)continue;
+    let localMessageId:string|null=null;
+    if(entry.messageId){
+      const hit=await one<{id:string}>('SELECT id FROM messages WHERE provider_id=? LIMIT 1',[String(entry.messageId)]);
+      if(!hit)continue; // Re-import after Resend catch-up, when the provider id is mapped locally.
+      localMessageId=hit.id;
+    }
     await run(
       `INSERT OR IGNORE INTO automation_audit(id,message_id,campaign_id,action,decision_json,executed,error,created_at)
        VALUES(?,?,?,?,?,?,?,?)`,
       [
-        entry.id,entry.messageId||null,entry.campaignId||null,String(entry.action),
+        entry.id,localMessageId,entry.campaignId||null,String(entry.action),
         JSON.stringify({source:'android-background',action:entry.action}),
         entry.executed?1:0,entry.error||null,String(entry.createdAt),
       ],
@@ -213,6 +219,7 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     syncing=true;
     try{
       const result=await syncAllAccounts();
+      await importBackgroundAutomationState();
       for(const id of result.newInboundIds)await evaluateInbound(id);
       await reconcileCampaignReplies();
       await syncSuppressionsToBackground();
