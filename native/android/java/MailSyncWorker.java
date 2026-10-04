@@ -318,7 +318,7 @@ public class MailSyncWorker extends Worker {
     }
 
     long now = System.currentTimeMillis();
-    int globalHour = countAllCampaignSends(campaigns, now - 3_600_000L);
+    int globalHour = countCampaignAuditSends(null, now - 3_600_000L);
     int budget = Math.min(MAX_BACKGROUND_BD_PER_RUN, Math.max(0, GLOBAL_BD_PER_HOUR - globalHour));
     if (budget <= 0) return;
 
@@ -330,8 +330,9 @@ public class MailSyncWorker extends Worker {
 
       int perHourLimit = Math.min(25, Math.max(1, campaign.optInt("maxPerHour", 25)));
       int perDayLimit = Math.max(1, campaign.optInt("maxPerDay", 100));
-      int perHour = countCampaignSends(campaign, now - 3_600_000L);
-      int perDay = countCampaignSends(campaign, now - 86_400_000L);
+      String campaignIdForRate = campaign.optString("id", "");
+      int perHour = countCampaignAuditSends(campaignIdForRate, now - 3_600_000L);
+      int perDay = countCampaignAuditSends(campaignIdForRate, now - 86_400_000L);
       if (perHour >= perHourLimit || perDay >= perDayLimit) continue;
 
       JSONArray contacts = campaign.optJSONArray("contacts");
@@ -633,23 +634,25 @@ public class MailSyncWorker extends Worker {
     return count;
   }
 
-  private int countAllCampaignSends(List<JSONObject> campaigns, long cutoff) {
-    int total = 0;
-    for (JSONObject campaign : campaigns) total += countCampaignSends(campaign, cutoff);
-    return total;
-  }
-
-  private int countCampaignSends(JSONObject campaign, long cutoff) {
-    JSONArray contacts = campaign.optJSONArray("contacts");
-    if (contacts == null) return 0;
+  private int countCampaignAuditSends(String campaignId, long cutoff) throws Exception {
+    Set<String> seen = new HashSet<>();
     int count = 0;
-    for (int i = 0; i < contacts.length(); i++) {
-      JSONObject contact = contacts.optJSONObject(i);
-      if (contact == null) continue;
-      JSONArray times = contact.optJSONArray("sendTimes");
-      if (times == null) continue;
-      for (int x = 0; x < times.length(); x++) {
-        if (parseTime(times.optString(x, "")) >= cutoff) count++;
+    String[] keys = {
+      BackgroundMailboxPlugin.AUDIT_KEY,
+      BackgroundMailboxPlugin.FOREGROUND_AUDIT_KEY
+    };
+    for (String key : keys) {
+      JSONArray audit = BackgroundMailboxPlugin.getEncryptedArray(context, key);
+      if (audit == null) continue;
+      for (int i = 0; i < audit.length(); i++) {
+        JSONObject row = audit.optJSONObject(i);
+        if (row == null || !row.optBoolean("executed", false)) continue;
+        if (!"create_outreach".equals(row.optString("action", ""))) continue;
+        if (campaignId != null && !campaignId.equals(row.optString("campaignId", ""))) continue;
+        if (parseTime(row.optString("createdAt", "")) < cutoff) continue;
+        String id = row.optString("id", "");
+        if (id.isEmpty()) id = key + ":" + i + ":" + row.optString("createdAt", "");
+        if (seen.add(id)) count++;
       }
     }
     return count;
