@@ -110,6 +110,18 @@ public class BackgroundMailboxPlugin extends Plugin {
   }
 
   @PluginMethod
+  public void setSuppressions(PluginCall call) {
+    String suppressionsJson = call.getString("suppressionsJson", "[]");
+    try {
+      JSONArray values = new JSONArray(suppressionsJson);
+      putEncrypted(SUPPRESSIONS_KEY, values.toString());
+      call.resolve();
+    } catch (Exception e) {
+      call.reject("Unable to secure suppressions", e);
+    }
+  }
+
+  @PluginMethod
   public void upsertCampaign(PluginCall call) {
     String id = call.getString("id");
     String campaignJson = call.getString("campaignJson");
