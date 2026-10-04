@@ -4,7 +4,7 @@ import { mobileResend, type MobileAccount } from './resend.js';
 import { accountForSender, flushMobileOutbox, refreshDomains, queueAndSend, syncAllAccounts } from './sync.js';
 import { configureAi, createDefaultRule, evaluateInbound, reconcileCampaignReplies, runCampaignTick } from './automation.js';
 import { pushAllReplicas, pushReplicaTarget } from './replica.js';
-import { configureBackgroundAccount, removeBackgroundAccount, triggerBackgroundMailboxSync, configureBackgroundAutomation, setBackgroundAutomationMode, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
+import { configureBackgroundAccount, removeBackgroundAccount, configureBackgroundAutomation, setBackgroundAutomationMode, setBackgroundSuppressions, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
 
 let syncing=false;
 const parseBody=(init:RequestInit):any=>{
@@ -154,6 +154,11 @@ async function syncAllCampaignsToBackground():Promise<void>{
   }
 }
 
+async function syncSuppressionsToBackground():Promise<void>{
+  const rows=await all<{email:string}>('SELECT email FROM suppressions ORDER BY email');
+  try{await setBackgroundSuppressions(rows.map(row=>row.email.toLowerCase()));}catch{/* foreground suppression table remains authoritative */}
+}
+
 async function createCampaign(body:any):Promise<any>{
   const from=String(body.from||'').toLowerCase();
   const account=await accountForSender(from);
@@ -203,15 +208,17 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     const bgAccounts=await all<MobileAccount>('SELECT * FROM accounts WHERE enabled=1');
     for(const account of bgAccounts){try{await configureBackgroundAccount(account);}catch{/* foreground sync still works */}}
     try{await importBackgroundAutomationState();}catch{/* foreground engine can continue */}
+    try{await syncSuppressionsToBackground();}catch{/* native suppression retry on next sync */}
     try{await syncAllCampaignsToBackground();}catch{/* native campaign retry on next sync */}
-    try{await triggerBackgroundMailboxSync();}catch{/* WorkManager best effort */}
     syncing=true;
     try{
       const result=await syncAllAccounts();
       for(const id of result.newInboundIds)await evaluateInbound(id);
       await reconcileCampaignReplies();
+      await syncSuppressionsToBackground();
       await flushMobileOutbox();
       await runCampaignTick();
+      await syncSuppressionsToBackground();
       await syncAllCampaignsToBackground();
       await pushAllReplicas();
       return result as T;
@@ -313,7 +320,7 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
   if(campaignStart&&method==='POST'){
     const id=decodeURIComponent(campaignStart[1]);
     await run("UPDATE campaigns SET status='active',updated_at=? WHERE id=?",[isoNow(),id]);
-    try{await importBackgroundAutomationState();await syncCampaignToBackground(id);await triggerBackgroundMailboxSync();}catch{/* foreground campaign remains active */}
+    try{await importBackgroundAutomationState();await syncSuppressionsToBackground();await syncCampaignToBackground(id);}catch{/* foreground campaign remains active */}
     return{ok:true} as T;
   }
   const campaignRun=path.match(/^\/api\/campaigns\/([^/]+)\/run$/);
