@@ -81,14 +81,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
 			<head>
 				<meta charSet="UTF-8" />
 				<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-				<link
-					rel="icon"
-					type="image/x-icon"
-					href="/favicon.ico"
-					sizes="48x48 32x32 16x16"
-				/>
 				<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-				<title>Agentic Inbox</title>
+				<title>Raeburn Mail</title>
 				<Meta />
 				<Links />
 			</head>

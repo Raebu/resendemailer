@@ -1,10 +1,10 @@
 {
-	"name": "agentic-inbox",
+	"name": "raeburn-hosted-mail",
 	"private": true,
 	"license": "Apache-2.0",
 	"type": "module",
 	"cloudflare": {
-		"label": "Agentic Inbox",
+		"label": "Raeburn Mail",
 		"products": ["Workers", "Durable Objects", "R2", "Workers AI"],
 		"bindings": {
 			"DOMAINS": {
