@@ -269,7 +269,7 @@ public class MailSyncWorker extends Worker {
       "https://api.resend.com/emails",
       apiKey,
       send,
-      "gibp-bg-reply-" + localId
+      "gibp-mobile-reply_" + account.optString("id", "") + "_" + localId
     );
     appendAudit(audit(localId, null, "send_reply", true, ""));
   }
@@ -411,7 +411,7 @@ public class MailSyncWorker extends Worker {
           "https://api.resend.com/emails",
           account.getString("apiKey"),
           send,
-          "gibp-bg-bd-" + campaign.optString("id", "") + "-" + contactId + "-" + step
+          "gibp-mobile-bd_" + campaign.optString("id", "") + "_" + contactId + "_" + step
         );
 
         String sentAt = Instant.now().toString();
