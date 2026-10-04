@@ -129,7 +129,7 @@ GIBP Mail includes local BD campaign state:
 - immediate stop on unsubscribe/do-not-contact language
 - audit record for AI decisions
 
-The current Android foreground engine processes campaign work on app launch/resume, network reconnection, manual sync and while the app is active. Android background mail checking is intentionally separate and does not bypass Android's background-execution rules.
+`WorkManager` also runs the constrained automation engine while the UI is closed. It can process safe auto-replies, reconcile replies/unsubscribes, and advance active BD campaigns from Android-Keystore-encrypted native state. Foreground launch/resume/network sync remains immediate and reconciles that native progress back into SQLCipher so background work cannot be sent twice.
 
 ## Android security model
 
@@ -153,9 +153,9 @@ Attachments live in Android app-private storage.
 
 ### Background credentials
 
-The native WorkManager worker needs to check Resend while the WebView is closed.
+The native WorkManager worker needs to check Resend and, when enabled, execute constrained AI/BD automation while the WebView is closed.
 
-Resend credentials used for that worker are stored separately using an AES-256-GCM key created inside **Android Keystore**. They are not written into source code, the APK, plain SharedPreferences or the browser bundle.
+Resend credentials, the AI gateway bearer token, active campaign state, suppressions and the native automation audit used by that worker are stored separately using AES-256-GCM keys created inside **Android Keystore**. They are not written into source code, the APK, plain SharedPreferences or the browser bundle.
 
 The worker:
 
@@ -164,7 +164,11 @@ The worker:
 3. checks all enabled Resend accounts;
 4. maintains an account-specific cursor;
 5. notifies only for messages newer than that cursor;
-6. performs a full mailbox catch-up when the app next wakes.
+6. reconciles campaign replies and unsubscribe language;
+7. may auto-reply only when the same hard-coded safe-category/confidence/rate gates pass;
+8. processes at most six BD sends per background run and never more than 25 campaign sends globally in an hour;
+9. persists campaign steps/follow-up times in encrypted native state;
+10. reconciles that state into the encrypted SQLCipher mailbox when the app next wakes.
 
 The first background run establishes the cursor without flooding the device with historic notifications.
 
@@ -436,9 +440,11 @@ Android does not guarantee exact periodic execution. WorkManager provides reliab
 For that reason:
 
 - new mail is checked in native background work;
-- full synchronization runs immediately on launch/resume/network recovery;
+- constrained safe auto-replies and active BD campaigns can also run in native background work;
+- full mailbox synchronization runs immediately on launch/resume/network recovery;
 - the foreground app synchronizes periodically while visible;
-- BD/AI campaign work is processed through the phone's local automation engine rather than pretending a WebView can run permanently in the background.
+- native and foreground campaign/audit/suppression state is reconciled before foreground automation runs, preventing duplicate sends;
+- exact execution remains OS-controlled rather than pretending a WebView can run permanently in the background.
 
 ### Resend is an API transport
 
