@@ -13,13 +13,19 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 @CapacitorPlugin(name = "BackgroundMailbox")
 public class BackgroundMailboxPlugin extends Plugin {
   static final String PREFS = "gibp_mail_background";
   static final String ACCOUNT_PREFIX = "acct_";
+  static final String CAMPAIGN_PREFIX = "campaign_";
+  static final String AUTOMATION_KEY = "automation";
+  static final String SUPPRESSIONS_KEY = "suppressions";
+  static final String AUDIT_KEY = "audit";
   static final String PERIODIC_NAME = "gibp_mail_background_periodic";
 
   @PluginMethod
@@ -36,7 +42,7 @@ public class BackgroundMailboxPlugin extends Plugin {
       account.put("id", id);
       account.put("name", name == null ? "Resend" : name);
       account.put("apiKey", apiKey);
-      prefs().edit().putString(ACCOUNT_PREFIX + id, CryptoBox.encrypt(account.toString())).apply();
+      putEncrypted(ACCOUNT_PREFIX + id, account.toString());
       schedule(getContext());
       call.resolve();
     } catch (Exception e) {
@@ -57,6 +63,103 @@ public class BackgroundMailboxPlugin extends Plugin {
   }
 
   @PluginMethod
+  public void configureAutomation(PluginCall call) {
+    String url = call.getString("url");
+    String token = call.getString("token");
+    String mode = call.getString("mode", "draft");
+    Double threshold = call.getDouble("threshold", 0.92);
+    Integer maxReplies = call.getInt("maxRepliesPerHour", 10);
+    if (url == null || !url.startsWith("https://") || token == null || token.length() < 12) {
+      call.reject("HTTPS gateway URL and bearer token are required");
+      return;
+    }
+    try {
+      JSONObject cfg = new JSONObject();
+      cfg.put("url", url.replaceAll("/+$", ""));
+      cfg.put("token", token);
+      cfg.put("mode", mode);
+      cfg.put("threshold", Math.max(0.5, Math.min(1.0, threshold == null ? 0.92 : threshold)));
+      cfg.put("maxRepliesPerHour", Math.max(1, Math.min(25, maxReplies == null ? 10 : maxReplies)));
+      putEncrypted(AUTOMATION_KEY, cfg.toString());
+      schedule(getContext());
+      call.resolve();
+    } catch (Exception e) {
+      call.reject("Unable to secure automation configuration", e);
+    }
+  }
+
+  @PluginMethod
+  public void setAutomationMode(PluginCall call) {
+    String mode = call.getString("mode", "draft");
+    Double threshold = call.getDouble("threshold", 0.92);
+    Integer maxReplies = call.getInt("maxRepliesPerHour", 10);
+    try {
+      JSONObject cfg = getEncryptedObject(AUTOMATION_KEY);
+      if (cfg == null) {
+        call.resolve();
+        return;
+      }
+      cfg.put("mode", mode);
+      cfg.put("threshold", Math.max(0.5, Math.min(1.0, threshold == null ? 0.92 : threshold)));
+      cfg.put("maxRepliesPerHour", Math.max(1, Math.min(25, maxReplies == null ? 10 : maxReplies)));
+      putEncrypted(AUTOMATION_KEY, cfg.toString());
+      call.resolve();
+    } catch (Exception e) {
+      call.reject("Unable to update background automation mode", e);
+    }
+  }
+
+  @PluginMethod
+  public void upsertCampaign(PluginCall call) {
+    String id = call.getString("id");
+    String campaignJson = call.getString("campaignJson");
+    if (id == null || campaignJson == null) {
+      call.reject("Campaign id and payload are required");
+      return;
+    }
+    try {
+      JSONObject campaign = new JSONObject(campaignJson);
+      if (!id.equals(campaign.optString("id"))) campaign.put("id", id);
+      putEncrypted(CAMPAIGN_PREFIX + id, campaign.toString());
+      schedule(getContext());
+      call.resolve();
+    } catch (Exception e) {
+      call.reject("Unable to secure campaign", e);
+    }
+  }
+
+  @PluginMethod
+  public void removeCampaign(PluginCall call) {
+    String id = call.getString("id");
+    if (id != null) prefs().edit().remove(CAMPAIGN_PREFIX + id).apply();
+    call.resolve();
+  }
+
+  @PluginMethod
+  public void getAutomationState(PluginCall call) {
+    try {
+      JSONArray campaigns = new JSONArray();
+      for (Map.Entry<String, ?> entry : prefs().getAll().entrySet()) {
+        if (!entry.getKey().startsWith(CAMPAIGN_PREFIX)) continue;
+        JSONObject value = getEncryptedObject(entry.getKey());
+        if (value != null) campaigns.put(value);
+      }
+      JSONArray suppressions = getEncryptedArray(SUPPRESSIONS_KEY);
+      if (suppressions == null) suppressions = new JSONArray();
+      JSONArray audit = getEncryptedArray(AUDIT_KEY);
+      if (audit == null) audit = new JSONArray();
+
+      JSObject result = new JSObject();
+      result.put("campaigns", campaigns);
+      result.put("suppressions", suppressions);
+      result.put("audit", audit);
+      call.resolve(result);
+    } catch (Exception e) {
+      call.reject("Unable to read background automation state", e);
+    }
+  }
+
+  @PluginMethod
   public void syncNow(PluginCall call) {
     WorkManager.getInstance(getContext()).enqueue(
       new OneTimeWorkRequest.Builder(MailSyncWorker.class)
@@ -68,6 +171,38 @@ public class BackgroundMailboxPlugin extends Plugin {
 
   private SharedPreferences prefs() {
     return getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+  }
+
+  static SharedPreferences prefs(Context context) {
+    return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+  }
+
+  static void putEncrypted(Context context, String key, String plain) throws Exception {
+    prefs(context).edit().putString(key, CryptoBox.encrypt(plain)).apply();
+  }
+
+  private void putEncrypted(String key, String plain) throws Exception {
+    putEncrypted(getContext(), key, plain);
+  }
+
+  static JSONObject getEncryptedObject(Context context, String key) throws Exception {
+    String encrypted = prefs(context).getString(key, null);
+    if (encrypted == null) return null;
+    return new JSONObject(CryptoBox.decrypt(encrypted));
+  }
+
+  private JSONObject getEncryptedObject(String key) throws Exception {
+    return getEncryptedObject(getContext(), key);
+  }
+
+  static JSONArray getEncryptedArray(Context context, String key) throws Exception {
+    String encrypted = prefs(context).getString(key, null);
+    if (encrypted == null) return null;
+    return new JSONArray(CryptoBox.decrypt(encrypted));
+  }
+
+  private JSONArray getEncryptedArray(String key) throws Exception {
+    return getEncryptedArray(getContext(), key);
   }
 
   static Constraints networkConstraints() {
