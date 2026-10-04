@@ -88,6 +88,8 @@ function hasAutomatedHeader(message: any): boolean {
 export async function evaluateInbound(messageId: string): Promise<AutomationDecision | null> {
   const message: any = await one('SELECT * FROM messages WHERE id=? AND direction=?', [messageId, 'inbound']);
   if (!message) return null;
+  const alreadyHandled=await one('SELECT 1 handled FROM automation_audit WHERE message_id=? LIMIT 1',[messageId]);
+  if(alreadyHandled)return null;
   const rule = await activeRule(message.account_id);
   if (!rule) return null;
 
