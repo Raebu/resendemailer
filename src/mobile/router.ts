@@ -4,7 +4,7 @@ import { mobileResend, type MobileAccount } from './resend.js';
 import { accountForSender, flushMobileOutbox, refreshDomains, queueAndSend, syncAllAccounts } from './sync.js';
 import { configureAi, createDefaultRule, evaluateInbound, reconcileCampaignReplies, runCampaignTick } from './automation.js';
 import { pushAllReplicas, pushReplicaTarget } from './replica.js';
-import { configureBackgroundAccount, removeBackgroundAccount, configureBackgroundAutomation, setBackgroundAutomationMode, setBackgroundSuppressions, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
+import { configureBackgroundAccount, removeBackgroundAccount, configureBackgroundAutomation, setBackgroundAutomationMode, setBackgroundSuppressions, setBackgroundForegroundAudit, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
 
 let syncing=false;
 const parseBody=(init:RequestInit):any=>{
@@ -165,6 +165,18 @@ async function syncSuppressionsToBackground():Promise<void>{
   try{await setBackgroundSuppressions(rows.map(row=>row.email.toLowerCase()));}catch{/* foreground suppression table remains authoritative */}
 }
 
+async function syncForegroundAuditToBackground():Promise<void>{
+  const rows=await all<any>(
+    "SELECT id,campaign_id,action,executed,created_at FROM automation_audit WHERE executed=1 AND action='create_outreach' AND created_at>=datetime('now','-1 day') ORDER BY created_at"
+  );
+  try{
+    await setBackgroundForegroundAudit(rows.map(row=>({
+      id:row.id,campaignId:row.campaign_id||null,action:row.action,
+      executed:Boolean(row.executed),createdAt:row.created_at,
+    })));
+  }catch{/* foreground audit remains authoritative */}
+}
+
 async function createCampaign(body:any):Promise<any>{
   const from=String(body.from||'').toLowerCase();
   const account=await accountForSender(from);
@@ -215,6 +227,7 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     for(const account of bgAccounts){try{await configureBackgroundAccount(account);}catch{/* foreground sync still works */}}
     try{await importBackgroundAutomationState();}catch{/* foreground engine can continue */}
     try{await syncSuppressionsToBackground();}catch{/* native suppression retry on next sync */}
+    try{await syncForegroundAuditToBackground();}catch{/* native rate audit retry on next sync */}
     try{await syncAllCampaignsToBackground();}catch{/* native campaign retry on next sync */}
     syncing=true;
     try{
@@ -226,6 +239,7 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
       await flushMobileOutbox();
       await runCampaignTick();
       await syncSuppressionsToBackground();
+      await syncForegroundAuditToBackground();
       await syncAllCampaignsToBackground();
       await pushAllReplicas();
       return result as T;
@@ -327,7 +341,7 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
   if(campaignStart&&method==='POST'){
     const id=decodeURIComponent(campaignStart[1]);
     await run("UPDATE campaigns SET status='active',updated_at=? WHERE id=?",[isoNow(),id]);
-    try{await importBackgroundAutomationState();await syncSuppressionsToBackground();await syncCampaignToBackground(id);}catch{/* foreground campaign remains active */}
+    try{await importBackgroundAutomationState();await syncSuppressionsToBackground();await syncForegroundAuditToBackground();await syncCampaignToBackground(id);}catch{/* foreground campaign remains active */}
     return{ok:true} as T;
   }
   const campaignRun=path.match(/^\/api\/campaigns\/([^/]+)\/run$/);
@@ -335,6 +349,7 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     const id=decodeURIComponent(campaignRun[1]);
     await importBackgroundAutomationState();
     const result=await runCampaignTick(id);
+    await syncForegroundAuditToBackground();
     await syncCampaignToBackground(id);
     return result as T;
   }
