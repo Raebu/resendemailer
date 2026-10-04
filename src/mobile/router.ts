@@ -202,6 +202,8 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     if(syncing)return {inbound:0,sent:0} as T;
     const bgAccounts=await all<MobileAccount>('SELECT * FROM accounts WHERE enabled=1');
     for(const account of bgAccounts){try{await configureBackgroundAccount(account);}catch{/* foreground sync still works */}}
+    try{await importBackgroundAutomationState();}catch{/* foreground engine can continue */}
+    try{await syncAllCampaignsToBackground();}catch{/* native campaign retry on next sync */}
     try{await triggerBackgroundMailboxSync();}catch{/* WorkManager best effort */}
     syncing=true;
     try{
@@ -210,6 +212,7 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
       await reconcileCampaignReplies();
       await flushMobileOutbox();
       await runCampaignTick();
+      await syncAllCampaignsToBackground();
       await pushAllReplicas();
       return result as T;
     }finally{syncing=false;}
@@ -270,25 +273,57 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     if(!account)throw new Error('Account not found');return{count:await refreshDomains(account)} as T;
   }
 
-  if(path==='/api/ai/config'&&method==='POST'){await configureAi(String(body.url||''),String(body.token||''));return{ok:true} as T;}
+  if(path==='/api/ai/config'&&method==='POST'){
+    const url=String(body.url||'').trim(), token=String(body.token||'').trim();
+    await configureAi(url,token);
+    const rule=await one<any>("SELECT * FROM automation_rules WHERE enabled=1 ORDER BY created_at LIMIT 1");
+    await configureBackgroundAutomation({
+      url,token,mode:String(rule?.mode||'draft'),threshold:Number(rule?.confidence_threshold||0.92),
+      maxRepliesPerHour:Number(rule?.max_auto_replies_per_hour||10),
+    });
+    return{ok:true} as T;
+  }
   if(path==='/api/automation/rules'&&method==='GET')return await all<any>('SELECT * FROM automation_rules ORDER BY created_at') as T;
   if(path.startsWith('/api/automation/rules/')&&method==='PATCH'){
     const id=decodeURIComponent(path.split('/').pop()!);
     const mode=['off','draft','auto_safe'].includes(body.mode)?body.mode:'draft';
+    const threshold=Math.max(.5,Math.min(1,Number(body.confidenceThreshold||.92)));
+    const maxRepliesPerHour=Math.max(1,Math.min(25,Number(body.maxAutoRepliesPerHour||10)));
     await run('UPDATE automation_rules SET enabled=?,mode=?,confidence_threshold=?,max_auto_replies_per_hour=?,updated_at=? WHERE id=?',
-      [body.enabled===false?0:1,mode,Math.max(.5,Math.min(1,Number(body.confidenceThreshold||.92))),Math.max(1,Math.min(25,Number(body.maxAutoRepliesPerHour||10))),isoNow(),id]);
+      [body.enabled===false?0:1,mode,threshold,maxRepliesPerHour,isoNow(),id]);
+    try{await setBackgroundAutomationMode({mode:body.enabled===false?'off':mode,threshold,maxRepliesPerHour});}catch{/* AI may not be configured yet */}
     return{ok:true} as T;
   }
   if(path==='/api/automation/audit'&&method==='GET')return await all<any>('SELECT * FROM automation_audit ORDER BY created_at DESC LIMIT 200') as T;
 
   if(path==='/api/campaigns'&&method==='GET')return await all<any>('SELECT * FROM campaigns ORDER BY created_at DESC') as T;
-  if(path==='/api/campaigns'&&method==='POST')return await createCampaign(body) as T;
+  if(path==='/api/campaigns'&&method==='POST'){
+    const created=await createCampaign(body);
+    try{await syncCampaignToBackground(created.id);}catch{/* background copy can be retried */}
+    return created as T;
+  }
   const contactsMatch=path.match(/^\/api\/campaigns\/([^/]+)\/contacts$/);
-  if(contactsMatch&&method==='POST')return await addCampaignContacts(decodeURIComponent(contactsMatch[1]),body) as T;
+  if(contactsMatch&&method==='POST'){
+    const id=decodeURIComponent(contactsMatch[1]);
+    const result=await addCampaignContacts(id,body);
+    try{await syncCampaignToBackground(id);}catch{/* background copy can be retried */}
+    return result as T;
+  }
   const campaignStart=path.match(/^\/api\/campaigns\/([^/]+)\/start$/);
-  if(campaignStart&&method==='POST'){await run("UPDATE campaigns SET status='active',updated_at=? WHERE id=?",[isoNow(),decodeURIComponent(campaignStart[1])]);return{ok:true} as T;}
+  if(campaignStart&&method==='POST'){
+    const id=decodeURIComponent(campaignStart[1]);
+    await run("UPDATE campaigns SET status='active',updated_at=? WHERE id=?",[isoNow(),id]);
+    try{await importBackgroundAutomationState();await syncCampaignToBackground(id);await triggerBackgroundMailboxSync();}catch{/* foreground campaign remains active */}
+    return{ok:true} as T;
+  }
   const campaignRun=path.match(/^\/api\/campaigns\/([^/]+)\/run$/);
-  if(campaignRun&&method==='POST')return await runCampaignTick(decodeURIComponent(campaignRun[1])) as T;
+  if(campaignRun&&method==='POST'){
+    const id=decodeURIComponent(campaignRun[1]);
+    await importBackgroundAutomationState();
+    const result=await runCampaignTick(id);
+    await syncCampaignToBackground(id);
+    return result as T;
+  }
 
   if(path==='/api/replicas'&&method==='GET')return await all<any>('SELECT id,name,url,enabled,last_revision,last_sync_at,last_error FROM replica_targets ORDER BY name') as T;
   if(path==='/api/replicas'&&method==='POST'){
