@@ -63,6 +63,16 @@ async function activeRule(accountId: string): Promise<any | null> {
   );
 }
 
+async function verifiedReplyFrom(message:any):Promise<string|null>{
+  const recipients=json<string[]>(message.to_json,[]).map(x=>x.trim().toLowerCase());
+  const domains=await all<{domain:string}>(
+    "SELECT domain FROM domains WHERE account_id=? AND status='verified' AND can_send=1",
+    [message.account_id],
+  );
+  const allowed=new Set(domains.map(d=>d.domain.toLowerCase()));
+  return recipients.find(address=>allowed.has(address.split('@')[1]||''))||null;
+}
+
 async function replyCountLastHour(): Promise<number> {
   const row = await one<{ n: number }>(
     "SELECT count(*) n FROM automation_audit WHERE executed=1 AND action='send_reply' AND created_at>=datetime('now','-1 hour')",
@@ -124,8 +134,10 @@ export async function evaluateInbound(messageId: string): Promise<AutomationDeci
 
   if (autoAllowed && decision.body.trim()) {
     try {
+      const replyFrom=await verifiedReplyFrom(message);
+      if(!replyFrom) throw new Error('No verified local recipient address is available for autonomous reply');
       const result = await queueAndSend({
-        from: message.to_json ? json<string[]>(message.to_json, [])[0] || '' : '',
+        from: replyFrom,
         to: [sender],
         subject: decision.subject || (/^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`),
         text: decision.body,
@@ -180,6 +192,13 @@ async function campaignSendCount(campaignId: string, period: 'hour'|'day'): Prom
   return Number(row?.n || 0);
 }
 
+async function globalCampaignSendCountLastHour():Promise<number>{
+  const row=await one<{n:number}>(
+    "SELECT count(*) n FROM automation_audit WHERE executed=1 AND action='create_outreach' AND created_at>=datetime('now','-1 hour')",
+  );
+  return Number(row?.n||0);
+}
+
 export async function runCampaignTick(campaignId?: string): Promise<{ attempted:number; sent:number; skipped:number }> {
   await reconcileCampaignReplies();
   const campaigns = campaignId
@@ -188,9 +207,10 @@ export async function runCampaignTick(campaignId?: string): Promise<{ attempted:
   let attempted=0, sent=0, skipped=0;
 
   for (const campaign of campaigns) {
+    const globalPerHour=await globalCampaignSendCountLastHour();
     const perHour = await campaignSendCount(campaign.id, 'hour');
     const perDay = await campaignSendCount(campaign.id, 'day');
-    if (perHour >= Math.min(25, Number(campaign.max_per_hour || 25)) || perDay >= Number(campaign.max_per_day || 100)) continue;
+    if (globalPerHour >= 25 || perHour >= Math.min(25, Number(campaign.max_per_hour || 25)) || perDay >= Number(campaign.max_per_day || 100)) continue;
 
     const contact = await one<any>(
       `SELECT * FROM campaign_contacts
