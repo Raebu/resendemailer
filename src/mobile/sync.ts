@@ -244,7 +244,7 @@ export async function accountForSender(address: string): Promise<MobileAccount> 
 }
 
 export async function queueAndSend(input: {
-  draftId?: string; from: string; to: string[]; cc?: string[]; bcc?: string[]; subject: string;
+  draftId?: string; localId?: string; from: string; to: string[]; cc?: string[]; bcc?: string[]; subject: string;
   text: string; replyToMessageId?: string | null; attachments?: Array<{ filename: string; contentType?: string; base64: string }>;
 }): Promise<{ id: string; status: string; error?: string }> {
   const account = await accountForSender(input.from);
@@ -252,7 +252,9 @@ export async function queueAndSend(input: {
   if (input.replyToMessageId) parent = await one('SELECT * FROM messages WHERE id=?', [input.replyToMessageId]);
   const refs = parent ? [...json<string[]>(parent.references_json, []), parent.message_id_header].filter(Boolean) : [];
   const threadId = parent?.thread_id || await resolveThread(input.subject, parent?.message_id_header || null, refs, isoNow());
-  const id = uid('msg_');
+  const id = input.localId || uid('msg_');
+  const existing = await one<{id:string}>('SELECT id FROM messages WHERE id=?',[id]);
+  if(existing) return sendQueuedMessage(id);
   const createdAt = isoNow();
   const revision = await nextRevision();
   const escaped = input.text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] || c)).replace(/\n/g, '<br>');
