@@ -138,7 +138,9 @@ export async function evaluateInbound(messageId: string): Promise<AutomationDeci
     try {
       const replyFrom=await verifiedReplyFrom(message);
       if(!replyFrom) throw new Error('No verified local recipient address is available for autonomous reply');
+      const providerKey=String(message.provider_id||message.id);
       const result = await queueAndSend({
+        localId:`reply_${message.account_id}_${providerKey}`,
         from: replyFrom,
         to: [sender],
         subject: decision.subject || (/^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`),
@@ -216,7 +218,7 @@ export async function runCampaignTick(campaignId?: string): Promise<{ attempted:
 
     const contact = await one<any>(
       `SELECT * FROM campaign_contacts
-       WHERE campaign_id=? AND state IN ('queued','followup_due')
+       WHERE campaign_id=? AND state IN ('queued','sent','followup_due') AND step<3
        AND (next_action_at IS NULL OR next_action_at<=?)
        ORDER BY created_at LIMIT 1`,
       [campaign.id, isoNow()],
@@ -254,6 +256,7 @@ export async function runCampaignTick(campaignId?: string): Promise<{ attempted:
 
     decision.action='create_outreach';
     const result = await queueAndSend({
+      localId:`bd_${campaign.id}_${contact.id}_${contact.step}`,
       from:campaign.from_address,
       to:[contact.email],
       subject:decision.subject || campaign.name,
