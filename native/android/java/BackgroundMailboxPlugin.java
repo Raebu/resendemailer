@@ -120,6 +120,38 @@ public class BackgroundMailboxPlugin extends Plugin {
     try {
       JSONObject campaign = new JSONObject(campaignJson);
       if (!id.equals(campaign.optString("id"))) campaign.put("id", id);
+
+      JSONObject existing = getEncryptedObject(CAMPAIGN_PREFIX + id);
+      if (existing != null) {
+        JSONArray oldContacts = existing.optJSONArray("contacts");
+        JSONArray newContacts = campaign.optJSONArray("contacts");
+        if (oldContacts != null && newContacts != null) {
+          java.util.Map<String, JSONObject> oldById = new java.util.HashMap<>();
+          for (int i = 0; i < oldContacts.length(); i++) {
+            JSONObject oldContact = oldContacts.optJSONObject(i);
+            if (oldContact != null) oldById.put(oldContact.optString("id", ""), oldContact);
+          }
+          for (int i = 0; i < newContacts.length(); i++) {
+            JSONObject incoming = newContacts.optJSONObject(i);
+            if (incoming == null) continue;
+            JSONObject oldContact = oldById.get(incoming.optString("id", ""));
+            if (oldContact == null) continue;
+
+            String oldUpdated = oldContact.optString("updatedAt", "");
+            String newUpdated = incoming.optString("updatedAt", "");
+            if (oldUpdated.compareTo(newUpdated) > 0) {
+              String[] fields = {"state","step","nextActionAt","lastSendAt","updatedAt","sendTimes"};
+              for (String field : fields) {
+                if (oldContact.has(field)) incoming.put(field, oldContact.get(field));
+              }
+            } else {
+              if (!incoming.has("sendTimes") && oldContact.has("sendTimes")) incoming.put("sendTimes", oldContact.get("sendTimes"));
+              if (!incoming.has("lastSendAt") && oldContact.has("lastSendAt")) incoming.put("lastSendAt", oldContact.get("lastSendAt"));
+            }
+          }
+        }
+      }
+
       putEncrypted(CAMPAIGN_PREFIX + id, campaign.toString());
       schedule(getContext());
       call.resolve();
