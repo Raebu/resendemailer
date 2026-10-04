@@ -250,7 +250,7 @@ npx wrangler deploy
 The included Worker defaults to:
 
 ```
-gpt-6-luna
+gpt-5.6-luna
 ```
 
 The gateway calls the OpenAI Responses API with a strict JSON schema. It rejects unauthenticated requests and sets no mailbox storage.
