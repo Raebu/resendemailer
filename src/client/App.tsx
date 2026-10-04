@@ -84,8 +84,13 @@ function App() {
   const newCompose=()=>setCompose({from:defaultIdentity,to:'',cc:'',bcc:'',subject:'',text:'',attachments:[]});
   const reply=(m:MessageDetail)=>{
     const to=m.direction==='inbound'?m.fromAddress:(m.toAddresses[0]||'');
+    const verifiedDomains=new Set(identities.map(i=>i.address.split('@')[1]?.toLowerCase()).filter(Boolean));
+    const ownAddress=(m.direction==='inbound'
+      ? m.toAddresses.find(address=>verifiedDomains.has(address.split('@')[1]?.toLowerCase()))
+      : (verifiedDomains.has(m.fromAddress.split('@')[1]?.toLowerCase())?m.fromAddress:undefined)
+    )||defaultIdentity;
     setCompose({
-      replyToMessageId:m.id, from:defaultIdentity, to, cc:'', bcc:'',
+      replyToMessageId:m.id, from:ownAddress, to, cc:'', bcc:'',
       subject:/^re:/i.test(m.subject)?m.subject:`Re: ${m.subject}`, text:'', attachments:[]
     });
   };
