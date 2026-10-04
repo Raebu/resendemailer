@@ -5,3 +5,4 @@ dist/
 .DS_Store
 data/
 backups/
+android/\nworkers/**/node_modules/\nworkers/**/.wrangler/\n

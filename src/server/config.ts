@@ -10,6 +10,7 @@ const raw = z.object({
   GIBP_MAIL_IDENTITIES: z.string().default('GIBP <hello@gibp.app>,GIBP Global <hello@gibp.global>'),
   GIBP_MAIL_SYNC_SECONDS: z.coerce.number().int().default(45),
   GIBP_MAIL_MAX_ATTACHMENT_BYTES: z.coerce.number().int().positive().default(26_214_400),
+  GIBP_REPLICA_TOKEN: z.string().min(24).optional(),
 }).parse(process.env);
 
 const expandHome = (p: string) => p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p;
@@ -22,4 +23,5 @@ export const config = {
   syncSeconds: Math.max(15, raw.GIBP_MAIL_SYNC_SECONDS),
   maxAttachmentBytes: raw.GIBP_MAIL_MAX_ATTACHMENT_BYTES,
   identitiesRaw: raw.GIBP_MAIL_IDENTITIES,
+  replicaToken: raw.GIBP_REPLICA_TOKEN ?? '',
 };

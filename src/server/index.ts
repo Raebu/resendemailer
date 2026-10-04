@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { config } from './config.js';
 import { db, getSetting, newId, now, previewOf, resolveThread, touchThread } from './db.js';
 import { flushOutbox, isSyncing, startOutboxLoop, startSyncLoop, syncAll } from './sync.js';
+import { installReplicaRoutes } from './replica.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -70,6 +71,8 @@ function messageDetail(row: any) {
     })),
   };
 }
+
+installReplicaRoutes(app);
 
 app.get('/api/status', (_req, res) => {
   const queued = (db.prepare("SELECT count(*) n FROM messages WHERE status='queued'").get() as any).n;
