@@ -26,6 +26,7 @@ public class BackgroundMailboxPlugin extends Plugin {
   static final String AUTOMATION_KEY = "automation";
   static final String SUPPRESSIONS_KEY = "suppressions";
   static final String AUDIT_KEY = "audit";
+  static final String FOREGROUND_AUDIT_KEY = "foreground_audit";
   static final String PERIODIC_NAME = "gibp_mail_background_periodic";
 
   @PluginMethod
@@ -118,6 +119,18 @@ public class BackgroundMailboxPlugin extends Plugin {
       call.resolve();
     } catch (Exception e) {
       call.reject("Unable to secure suppressions", e);
+    }
+  }
+
+  @PluginMethod
+  public void setForegroundAudit(PluginCall call) {
+    String auditJson = call.getString("auditJson", "[]");
+    try {
+      JSONArray values = new JSONArray(auditJson);
+      putEncrypted(FOREGROUND_AUDIT_KEY, values.toString());
+      call.resolve();
+    } catch (Exception e) {
+      call.reject("Unable to secure foreground audit", e);
     }
   }
 
