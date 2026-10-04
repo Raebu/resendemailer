@@ -24,6 +24,7 @@ interface BackgroundMailboxPlugin {
   }):Promise<void>;
   setAutomationMode(options:{mode:string;threshold:number;maxRepliesPerHour:number}):Promise<void>;
   setSuppressions(options:{suppressionsJson:string}):Promise<void>;
+  setForegroundAudit(options:{auditJson:string}):Promise<void>;
   upsertCampaign(options:{id:string;campaignJson:string}):Promise<void>;
   removeCampaign(options:{id:string}):Promise<void>;
   getAutomationState():Promise<BackgroundAutomationState>;
@@ -50,6 +51,9 @@ export async function setBackgroundAutomationMode(input:{
 }
 export async function setBackgroundSuppressions(emails:string[]):Promise<void>{
   await BackgroundMailbox.setSuppressions({suppressionsJson:JSON.stringify(emails)});
+}
+export async function setBackgroundForegroundAudit(audit:any[]):Promise<void>{
+  await BackgroundMailbox.setForegroundAudit({auditJson:JSON.stringify(audit)});
 }
 export async function upsertBackgroundCampaign(id:string,campaign:any):Promise<void>{
   await BackgroundMailbox.upsertCampaign({id,campaignJson:JSON.stringify(campaign)});
