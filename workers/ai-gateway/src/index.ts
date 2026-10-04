@@ -54,7 +54,7 @@ export default {
     ].join(' ');
 
     const payload={
-      model:env.OPENAI_MODEL||'gpt-6-luna',
+      model:env.OPENAI_MODEL||'gpt-5.6-luna',
       input:[
         {role:'system',content:[{type:'input_text',text:system}]},
         {role:'user',content:[{type:'input_text',text:JSON.stringify({task:input.task,payload:input.payload}).slice(0,50000)}]},
