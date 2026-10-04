@@ -4,7 +4,7 @@ import { mobileResend, type MobileAccount } from './resend.js';
 import { accountForSender, flushMobileOutbox, refreshDomains, queueAndSend, syncAllAccounts } from './sync.js';
 import { configureAi, createDefaultRule, evaluateInbound, reconcileCampaignReplies, runCampaignTick } from './automation.js';
 import { pushAllReplicas, pushReplicaTarget } from './replica.js';
-import { configureBackgroundAccount, removeBackgroundAccount, triggerBackgroundMailboxSync } from './background.js';
+import { configureBackgroundAccount, removeBackgroundAccount, triggerBackgroundMailboxSync, configureBackgroundAutomation, setBackgroundAutomationMode, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
 
 let syncing=false;
 const parseBody=(init:RequestInit):any=>{
@@ -80,6 +80,78 @@ async function accountsPublic():Promise<any[]>{
       (SELECT count(*) FROM domains d WHERE d.account_id=a.id AND d.status='verified') verified_domains
     FROM accounts a ORDER BY a.created_at
   `);
+}
+
+async function importBackgroundAutomationState():Promise<void>{
+  let state:any;
+  try{state=await getBackgroundAutomationState();}catch{return;}
+
+  for(const email of Array.isArray(state?.suppressions)?state.suppressions:[]){
+    if(typeof email!=='string'||!email.includes('@'))continue;
+    await run(
+      'INSERT INTO suppressions(email,reason,created_at) VALUES(?,?,?) ON CONFLICT(email) DO UPDATE SET reason=excluded.reason',
+      [email.toLowerCase(),'background unsubscribe',isoNow()],
+    );
+  }
+
+  for(const entry of Array.isArray(state?.audit)?state.audit:[]){
+    if(!entry?.id||!entry?.action||!entry?.createdAt)continue;
+    await run(
+      `INSERT OR IGNORE INTO automation_audit(id,message_id,campaign_id,action,decision_json,executed,error,created_at)
+       VALUES(?,?,?,?,?,?,?,?)`,
+      [
+        entry.id,entry.messageId||null,entry.campaignId||null,String(entry.action),
+        JSON.stringify({source:'android-background',action:entry.action}),
+        entry.executed?1:0,entry.error||null,String(entry.createdAt),
+      ],
+    );
+  }
+
+  for(const campaign of Array.isArray(state?.campaigns)?state.campaigns:[]){
+    const campaignId=String(campaign?.id||'');
+    if(!campaignId)continue;
+    for(const contact of Array.isArray(campaign?.contacts)?campaign.contacts:[]){
+      const id=String(contact?.id||'');
+      if(!id)continue;
+      const current=await one<{updated_at:string}>(
+        'SELECT updated_at FROM campaign_contacts WHERE id=? AND campaign_id=?',[id,campaignId]
+      );
+      if(!current)continue;
+      const updatedAt=String(contact.updatedAt||current.updated_at||isoNow());
+      if(current.updated_at && current.updated_at>updatedAt)continue;
+      await run(
+        'UPDATE campaign_contacts SET state=?,step=?,next_action_at=?,updated_at=? WHERE id=? AND campaign_id=?',
+        [
+          String(contact.state||'queued'),Number(contact.step||0),
+          contact.nextActionAt?String(contact.nextActionAt):null,updatedAt,id,campaignId,
+        ],
+      );
+    }
+  }
+}
+
+async function syncCampaignToBackground(campaignId:string):Promise<void>{
+  const campaign=await one<any>('SELECT * FROM campaigns WHERE id=?',[campaignId]);
+  if(!campaign)return;
+  const contacts=await all<any>('SELECT * FROM campaign_contacts WHERE campaign_id=? ORDER BY created_at',[campaignId]);
+  await upsertBackgroundCampaign(campaignId,{
+    id:campaign.id,name:campaign.name,accountId:campaign.account_id,fromAddress:campaign.from_address,
+    objective:campaign.objective,status:campaign.status,maxPerHour:Number(campaign.max_per_hour||25),
+    maxPerDay:Number(campaign.max_per_day||100),followupDays:Number(campaign.followup_days||3),
+    updatedAt:campaign.updated_at,
+    contacts:contacts.map(contact=>({
+      id:contact.id,email:contact.email,name:contact.name||'',company:contact.company||'',
+      context:contact.context||'',state:contact.state,step:Number(contact.step||0),
+      nextActionAt:contact.next_action_at||null,updatedAt:contact.updated_at,
+    })),
+  });
+}
+
+async function syncAllCampaignsToBackground():Promise<void>{
+  const campaigns=await all<{id:string}>('SELECT id FROM campaigns');
+  for(const campaign of campaigns){
+    try{await syncCampaignToBackground(campaign.id);}catch{/* foreground campaign state remains authoritative on next retry */}
+  }
 }
 
 async function createCampaign(body:any):Promise<any>{
