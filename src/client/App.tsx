@@ -315,6 +315,8 @@ function App() {
               <h2>{thread.subject||'(no subject)'}</h2>
             </div>
             <div className="threadActions">
+              <button title="Snooze 24 hours" aria-label="Snooze 24 hours" onClick={()=>void snoozeCurrent(24)}><MailIcon name="snooze" size={20}/></button>
+              <button title="Waiting for reply — remind in 3 days" aria-label="Waiting for reply" onClick={()=>void waitCurrent(3)}><MailIcon name="clock" size={20}/></button>
               <button title="Archive" aria-label="Archive" onClick={()=>void patch(thread.messages.at(-1)!.id,{isArchived:true})}><MailIcon name="archive" size={20}/></button>
               <button title="Trash" aria-label="Move to trash" onClick={()=>void patch(thread.messages.at(-1)!.id,{trash:true})}><MailIcon name="trash" size={20}/></button>
             </div>
@@ -329,12 +331,28 @@ function App() {
               </div>
               <time>{new Date(m.createdAt).toLocaleString([], {dateStyle:'medium',timeStyle:'short'})}</time>
             </div>
-            {m.htmlBody ? <iframe title={m.subject} sandbox="" srcDoc={m.htmlBody}/> : <div className="plainBody">{m.textBody||'(empty message)'}</div>}
+            {(m.whyItMatters||m.priority||m.aliasAddress||m.language)&&<div className="intelligenceStrip">
+              <span><MailIcon name="sparkles" size={15}/>{m.whyItMatters||m.intelligenceSummary||m.category||'Message intelligence'}</span>
+              <div>
+                {m.priority&&m.priority!=='normal'&&<b className={`priority-${m.priority}`}>{m.priority}</b>}
+                {m.aliasAddress&&<b>{m.aliasAddress}</b>}
+                {m.language&&m.language!=='unknown'&&<b>{m.language}</b>}
+              </div>
+            </div>}
+            {translations[m.id]
+              ? <div className="translatedBody"><div className="translationLabel"><MailIcon name="language" size={15}/>English translation</div>{translations[m.id].text}</div>
+              : (m.htmlBody ? <iframe title={m.subject} sandbox="" srcDoc={m.htmlBody}/> : <div className="plainBody">{m.textBody||'(empty message)'}</div>)}
             {!!m.attachments.length&&<div className="attachments">{m.attachments.map(a=><button className="attachmentButton" key={a.id} onClick={()=>void openAttachment(a.id)}>
               <span className="attachmentIcon"><MailIcon name="attach" size={19}/></span>
               <div><b>{a.filename}</b><small>{a.sizeBytes?formatBytes(a.sizeBytes):a.contentType}</small></div>
             </button>)}</div>}
-            <div className="emailActions"><button onClick={()=>reply(m)}><MailIcon name="reply" size={18}/>Reply</button></div>
+            <div className="emailActions">
+              <button onClick={()=>reply(m)}><MailIcon name="reply" size={18}/>Reply</button>
+              {m.direction==='inbound'&&m.language&&m.language!=='English'&&m.language!=='unknown'&&
+                <button onClick={()=>translations[m.id]?setTranslations(prev=>{const x={...prev};delete x[m.id];return x;}):void translateMessage(m)}>
+                  <MailIcon name="language" size={18}/>{translations[m.id]?'Show original':'Translate'}
+                </button>}
+            </div>
           </article>)}</div>
         </section>}
       </div>
