@@ -191,7 +191,7 @@ Clone:
 ```bash
 git clone https://github.com/Raebu/resendemailer.git
 cd resendemailer
-npm install
+npm ci
 ```
 
 Generate the Android project the first time:
@@ -212,7 +212,9 @@ APK output:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The repository also contains a GitHub Actions Android workflow. Every PR/build branch produces a `gibp-mail-debug-apk` artifact when the native build passes.
+The repository also contains a GitHub Actions Android workflow. Every PR/build branch produces a `gibp-mail-debug-apk` artifact containing both the APK and its SHA-256 checksum when the native build passes.
+
+For the complete deterministic build plus checksum from a fresh clone, run `npm run preflight`. With an authorised USB-debugging device attached, `npm run android:install` builds if necessary, installs the APK, launches `global.gibp.mail`, and checks for an immediate fatal exception.
 
 ## First Android setup
 
@@ -246,7 +248,7 @@ Deploy:
 
 ```bash
 cd workers/ai-gateway
-npm install
+npm ci
 
 npx wrangler secret put OPENAI_API_KEY
 npx wrangler secret put GIBP_AI_GATEWAY_TOKEN
@@ -382,7 +384,7 @@ Desktop storage:
 Web/desktop:
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -396,6 +398,13 @@ Validation:
 
 ```bash
 npm run check
+npm run worker:check
+```
+
+Full Android preflight:
+
+```bash
+npm run preflight
 ```
 
 Android project refresh:
