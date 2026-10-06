@@ -51,6 +51,7 @@ function App() {
   const [settingsOpen,setSettingsOpen] = useState(false);
   const [mobileFoldersOpen,setMobileFoldersOpen] = useState(false);
   const [mobileSearchOpen,setMobileSearchOpen] = useState(false);
+  const [translations,setTranslations] = useState<Record<string,{text:string;backTranslation:string}>>({});
   const draftTimer = useRef<number|null>(null);
   const mobileSearchRef = useRef<HTMLInputElement|null>(null);
 
@@ -135,22 +136,46 @@ function App() {
     return()=>{ if(draftTimer.current) clearTimeout(draftTimer.current); };
   },[compose,persistDraft]);
 
-  const send=async()=>{
+  const send=async(options:{scheduledAt?:string;undoSeconds?:number}={})=>{
     if(!compose) return;
     setBusy(true); setError(null);
     try {
       const attachments=await Promise.all(compose.attachments.map(async f=>({
         filename:f.name,contentType:f.type||'application/octet-stream',base64:await fileToBase64(f)
       })));
-      const result=await api<{status:string;error?:string}>('/api/send',{method:'POST',body:JSON.stringify({
+      const result=await api<{id?:string;status:string;error?:string;undoUntil?:string;scheduledAt?:string}>('/api/send',{method:'POST',body:JSON.stringify({
         draftId:compose.id,from:compose.from,to:csv(compose.to),cc:csv(compose.cc),bcc:csv(compose.bcc),
-        subject:compose.subject,text:compose.text,replyToMessageId:compose.replyToMessageId??null,attachments
+        subject:compose.subject,text:compose.text,replyToMessageId:compose.replyToMessageId??null,attachments,
+        scheduledAt:options.scheduledAt,undoSeconds:options.undoSeconds||0,
       })});
       setCompose(null);
       if(result.status==='queued') setError(result.error ? `Queued locally: ${result.error}` : 'Queued locally and will send automatically when online.');
+      if(result.status==='scheduled') setError(options.undoSeconds ? `Send queued with ${options.undoSeconds}s Undo window.` : `Scheduled for ${new Date(result.scheduledAt||options.scheduledAt||'').toLocaleString()}.`);
       await Promise.all([loadList(),refreshStatus()]);
     } catch(e){setError(e instanceof Error?e.message:String(e));}
     finally{setBusy(false);}
+  };
+  const translateMessage=async(m:MessageDetail)=>{
+    const source=m.textBody||m.preview||'';
+    if(!source)return;
+    setBusy(true);
+    try{
+      const result=await api<{text:string;back_translation?:string;backTranslation?:string}>('/api/language',{method:'POST',body:JSON.stringify({
+        text:source,sourceLanguage:m.language||'auto',targetLanguage:'English',mode:'translate',tone:'professional'
+      })});
+      setTranslations(prev=>({...prev,[m.id]:{text:result.text,backTranslation:result.back_translation||result.backTranslation||''}}));
+    }catch(e){setError(e instanceof Error?e.message:String(e));}
+    finally{setBusy(false);}
+  };
+  const snoozeCurrent=async(hours:number)=>{
+    const t=thread?.messages.at(-1);if(!t)return;
+    await api('/api/snooze',{method:'POST',body:JSON.stringify({threadId:t.threadId,untilAt:new Date(Date.now()+hours*3600000).toISOString()})});
+    setThread(null);await loadList();
+  };
+  const waitCurrent=async(days:number)=>{
+    const t=thread?.messages.at(-1);if(!t)return;
+    await api('/api/waiting',{method:'POST',body:JSON.stringify({threadId:t.threadId,messageId:t.id,dueAt:new Date(Date.now()+days*86400000).toISOString()})});
+    setThread(null);await loadList();
   };
 
   const unread=useMemo(()=>messages.filter(m=>!m.isRead).length,[messages]);
