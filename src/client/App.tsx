@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Folder, Identity, MessageDetail, MessageSummary, Status, ThreadDetail } from '../shared/types.js';
 import { mailApi as api, openAttachment } from './mailApi.js';
+import { MailIcon, type MailIconName } from './MailIcon.js';
 import { SettingsPanel } from './SettingsPanel.js';
 
 type Draft = {
@@ -12,11 +13,14 @@ type ComposeState = {
   subject:string; text:string; attachments:File[];
 };
 
-const folders: {id:Folder; label:string; icon:string}[] = [
-  {id:'inbox',label:'Inbox',icon:'▣'}, {id:'starred',label:'Starred',icon:'☆'},
-  {id:'sent',label:'Sent',icon:'↗'}, {id:'drafts',label:'Drafts',icon:'◫'},
-  {id:'outbox',label:'Outbox',icon:'⌛'}, {id:'archive',label:'Archive',icon:'▤'},
-  {id:'trash',label:'Trash',icon:'♲'},
+const folders: {id:Folder; label:string; icon:MailIconName}[] = [
+  {id:'inbox',label:'Inbox',icon:'inbox'},
+  {id:'starred',label:'Starred',icon:'star'},
+  {id:'sent',label:'Sent',icon:'send'},
+  {id:'drafts',label:'Drafts',icon:'draft'},
+  {id:'outbox',label:'Outbox',icon:'clock'},
+  {id:'archive',label:'Archive',icon:'archive'},
+  {id:'trash',label:'Trash',icon:'trash'},
 ];
 
 const csv = (value:string) => value.split(',').map(v=>v.trim()).filter(Boolean);
@@ -26,7 +30,7 @@ const niceDate = (value:string|null|undefined) => {
   const today = new Date();
   return d.toDateString() === today.toDateString()
     ? d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
-    : d.toLocaleDateString([], {day:'2-digit',month:'short'});
+    : d.toLocaleDateString([], {day:'numeric',month:'short'});
 };
 const initials = (name:string) => name.split(/[ @._-]+/).filter(Boolean).slice(0,2).map(x=>x[0]?.toUpperCase()).join('') || '?';
 
@@ -42,7 +46,10 @@ function App() {
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState<string|null>(null);
   const [settingsOpen,setSettingsOpen] = useState(false);
+  const [mobileFoldersOpen,setMobileFoldersOpen] = useState(false);
+  const [mobileSearchOpen,setMobileSearchOpen] = useState(false);
   const draftTimer = useRef<number|null>(null);
+  const mobileSearchRef = useRef<HTMLInputElement|null>(null);
 
   const refreshStatus = useCallback(async()=>setStatus(await api<Status>('/api/status')),[]);
   const loadList = useCallback(async()=>{
@@ -63,7 +70,17 @@ function App() {
     const t=window.setInterval(()=>{void refreshStatus(); void loadList();},15_000);
     return()=>clearInterval(t);
   },[loadList,refreshStatus]);
+  useEffect(()=>{
+    if (!mobileSearchOpen) return;
+    const t=window.setTimeout(()=>mobileSearchRef.current?.focus(),80);
+    return()=>window.clearTimeout(t);
+  },[mobileSearchOpen]);
 
+  const selectFolder=(id:Folder)=>{
+    setFolder(id);
+    setThread(null);
+    setMobileFoldersOpen(false);
+  };
   const openThread=async (m:MessageSummary)=>{
     const value=await api<ThreadDetail>(`/api/threads/${m.threadId}`);
     setThread(value); void loadList();
@@ -134,88 +151,240 @@ function App() {
   };
 
   const unread=useMemo(()=>messages.filter(m=>!m.isRead).length,[messages]);
+  const currentFolder=folders.find(f=>f.id===folder) || folders[0];
 
   return <div className="app">
-    <aside className="sidebar">
-      <div className="brand"><div className="brandMark">G</div><div><strong>GIBP</strong><span>MAIL</span></div></div>
-      <button className="composeBtn" onClick={newCompose}><span>＋</span> Compose</button>
-      <nav>{folders.map(f=><button key={f.id} className={folder===f.id?'active':''} onClick={()=>{setFolder(f.id);setThread(null)}}>
-        <span className="navIcon">{f.icon}</span><span>{f.label}</span>
+    <aside className="sidebar" aria-label="Mailbox navigation">
+      <div className="brand">
+        <div className="brandMark" aria-hidden="true">G</div>
+        <div><strong>GIBP</strong><span>MAIL</span></div>
+      </div>
+      <button className="composeBtn" onClick={newCompose}>
+        <MailIcon name="compose" size={19}/><span>Compose</span>
+      </button>
+      <nav>{folders.map(f=><button key={f.id} className={folder===f.id?'active':''} onClick={()=>selectFolder(f.id)}>
+        <MailIcon name={f.icon} size={19} className="navIcon"/><span>{f.label}</span>
         {f.id==='inbox'&&unread>0&&<b>{unread}</b>}{f.id==='outbox'&&status?.queued ? <b>{status.queued}</b>:null}
       </button>)}</nav>
       <div className="accounts">
         <small>IDENTITIES</small>
-        {identities.map(i=><div className="identity" key={i.address}><span className="dot"/><div><b>{i.name||'GIBP'}</b><em>{i.address}</em></div></div>)}
+        {identities.slice(0,5).map(i=><div className="identity" key={i.address}>
+          <span className="identityAvatar">{initials(i.name||i.address)}</span>
+          <div><b>{i.name||'GIBP'}</b><em>{i.address}</em></div>
+        </div>)}
       </div>
       <div className="syncState">
         <span className={status?.configured?'health good':'health bad'}/>
-        <div><b>{status?.configured?'Resend connected':'Resend not configured'}</b><small>{status?.lastSyncAt?`Synced ${niceDate(status.lastSyncAt)}`:'Local mailbox'}</small></div>
+        <div><b>{status?.configured?'Connected':'Not configured'}</b><small>{status?.lastSyncAt?`Synced ${niceDate(status.lastSyncAt)}`:'Local mailbox'}</small></div>
       </div>
     </aside>
 
     <main className="mail">
-      <header>
-        <div className="search"><span>⌕</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search mail"/></div>
-        <button className="iconBtn" onClick={()=>setSettingsOpen(true)} title="Settings">⚙</button><button className="iconBtn" onClick={runSync} disabled={busy} title="Sync now">{busy||status?.syncing?'◌':'↻'}</button>
+      <header className="desktopToolbar">
+        <div className="search">
+          <MailIcon name="search" size={19}/>
+          <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search mail" aria-label="Search mail"/>
+        </div>
+        <button className="iconBtn" onClick={()=>setSettingsOpen(true)} title="Settings" aria-label="Settings"><MailIcon name="settings"/></button>
+        <button className="iconBtn" onClick={runSync} disabled={busy} title="Sync now" aria-label="Sync now">
+          <MailIcon name="sync" className={busy||status?.syncing?'spin':''}/>
+        </button>
       </header>
-      {error&&<div className="notice">{error}<button onClick={()=>setError(null)}>×</button></div>}
+
+      {!thread&&<header className="mobileTopbar">
+        <button className="mobileBrandButton" onClick={()=>setMobileFoldersOpen(true)} aria-label="Open folders">
+          <span className="brandMark mobileBrandMark">G</span>
+        </button>
+        <div className="mobileTitle">
+          <strong>{currentFolder.label}</strong>
+          <span>{status?.lastSyncAt?`Synced ${niceDate(status.lastSyncAt)}`:'GIBP Mail'}</span>
+        </div>
+        <div className="mobileTopActions">
+          <button className="mobileIconButton" onClick={()=>setMobileSearchOpen(v=>!v)} aria-label="Search">
+            <MailIcon name={mobileSearchOpen?'close':'search'} size={22}/>
+          </button>
+          <button className="mobileIconButton" onClick={()=>void runSync()} disabled={busy} aria-label="Sync now">
+            <MailIcon name="sync" size={21} className={busy||status?.syncing?'spin':''}/>
+          </button>
+        </div>
+      </header>}
+
+      {!thread&&mobileSearchOpen&&<div className="mobileSearchBar">
+        <MailIcon name="search" size={20}/>
+        <input
+          ref={mobileSearchRef}
+          value={query}
+          onChange={e=>setQuery(e.target.value)}
+          placeholder="Search mail"
+          aria-label="Search mail"
+        />
+        {query&&<button onClick={()=>setQuery('')} aria-label="Clear search"><MailIcon name="close" size={18}/></button>}
+      </div>}
+
+      {error&&<div className="notice"><span>{error}</span><button onClick={()=>setError(null)} aria-label="Dismiss"><MailIcon name="close" size={18}/></button></div>}
+
       <div className="content">
         <section className={`listPane ${thread?'withThread':''}`}>
-          <div className="listTitle"><div><h1>{folders.find(f=>f.id===folder)?.label}</h1><span>{folder==='drafts'?drafts.length:messages.length} conversations</span></div></div>
+          <div className="listTitle">
+            <div>
+              <h1>{currentFolder.label}</h1>
+              <span>{folder==='drafts'?drafts.length:messages.length} {folder==='drafts'?'drafts':'conversations'}</span>
+            </div>
+          </div>
+
           {folder==='drafts' ? <div className="messageList">
-            {drafts.map(d=><button className="messageRow" key={d.id} onClick={()=>openDraft(d)}>
-              <div className="avatar draft">D</div><div className="msgMain"><div className="msgTop"><b>Draft</b><time>{niceDate(d.updatedAt)}</time></div><strong>{d.subject||'(no subject)'}</strong><p>{d.textBody||'Empty draft'}</p></div>
+            {drafts.map(d=><button className="messageRow draftRow" key={d.id} onClick={()=>openDraft(d)}>
+              <div className="avatar draft"><MailIcon name="draft" size={19}/></div>
+              <div className="msgMain">
+                <div className="msgTop"><b>Draft</b><time>{niceDate(d.updatedAt)}</time></div>
+                <strong>{d.subject||'(no subject)'}</strong>
+                <p>{d.textBody||'Empty draft'}</p>
+              </div>
             </button>)}
             {!drafts.length&&<Empty label="No drafts"/>}
           </div> : <div className="messageList">
-            {messages.map(m=><button className={`messageRow ${!m.isRead?'unread':''} ${thread?.id===m.threadId?'selected':''}`} key={m.id} onClick={()=>void openThread(m)}>
+            {messages.map(m=><article
+              className={`messageRow ${!m.isRead?'unread':''} ${thread?.id===m.threadId?'selected':''}`}
+              key={m.id}
+              onClick={()=>void openThread(m)}
+              onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();void openThread(m);}}}
+              role="button"
+              tabIndex={0}
+            >
               <div className="avatar">{initials(m.fromName||m.fromAddress)}</div>
-              <div className="msgMain"><div className="msgTop"><b>{m.direction==='outbound'?'To: '+(m.toAddresses[0]||''):(m.fromName||m.fromAddress)}</b><time>{niceDate(m.receivedAt||m.sentAt||m.createdAt)}</time></div>
-                <strong>{m.subject||'(no subject)'} {m.threadCount>1&&<i>{m.threadCount}</i>}</strong><p>{m.preview||'No preview'}</p>
-                <div className="rowMeta">{m.attachmentCount>0&&<span>⌕ {m.attachmentCount}</span>}{m.status==='queued'&&<span className="queued">Queued</span>}</div>
+              <div className="msgMain">
+                <div className="msgTop">
+                  <b>{m.direction==='outbound'?`To: ${m.toAddresses[0]||''}`:(m.fromName||m.fromAddress)}</b>
+                  <time>{niceDate(m.receivedAt||m.sentAt||m.createdAt)}</time>
+                </div>
+                <strong>{m.subject||'(no subject)'} {m.threadCount>1&&<i>{m.threadCount}</i>}</strong>
+                <p>{m.preview||'No preview'}</p>
+                <div className="rowMeta">
+                  {m.attachmentCount>0&&<span><MailIcon name="attach" size={14}/>{m.attachmentCount}</span>}
+                  {m.status==='queued'&&<span className="queued">Queued</span>}
+                </div>
               </div>
-              <span className={`star ${m.isStarred?'on':''}`} onClick={e=>{e.stopPropagation();void patch(m.id,{isStarred:!m.isStarred})}}>★</span>
-            </button>)}
+              <button
+                className={`starButton ${m.isStarred?'on':''}`}
+                onClick={e=>{e.stopPropagation();void patch(m.id,{isStarred:!m.isStarred});}}
+                aria-label={m.isStarred?'Remove star':'Add star'}
+              ><MailIcon name="star" size={20}/></button>
+            </article>)}
             {!messages.length&&<Empty label={query?'No matching mail':'Nothing here yet'}/>}
           </div>}
         </section>
 
         {thread&&<section className="threadPane">
-          <div className="threadHeader"><div><button className="backBtn" onClick={()=>setThread(null)}>←</button><h2>{thread.subject||'(no subject)'}</h2></div>
+          <div className="threadHeader">
+            <div className="threadHeaderTitle">
+              <button className="backBtn" onClick={()=>setThread(null)} aria-label="Back to inbox"><MailIcon name="back"/></button>
+              <h2>{thread.subject||'(no subject)'}</h2>
+            </div>
             <div className="threadActions">
-              <button title="Archive" onClick={()=>void patch(thread.messages.at(-1)!.id,{isArchived:true})}>▤</button>
-              <button title="Trash" onClick={()=>void patch(thread.messages.at(-1)!.id,{trash:true})}>♲</button>
+              <button title="Archive" aria-label="Archive" onClick={()=>void patch(thread.messages.at(-1)!.id,{isArchived:true})}><MailIcon name="archive" size={20}/></button>
+              <button title="Trash" aria-label="Move to trash" onClick={()=>void patch(thread.messages.at(-1)!.id,{trash:true})}><MailIcon name="trash" size={20}/></button>
             </div>
           </div>
           <div className="threadMessages">{thread.messages.map(m=><article className="emailCard" key={m.id}>
-            <div className="emailMeta"><div className="avatar">{initials(m.fromName||m.fromAddress)}</div><div className="sender"><b>{m.fromName||m.fromAddress}</b><span>&lt;{m.fromAddress}&gt;</span><small>to {m.toAddresses.join(', ')}</small></div><time>{new Date(m.createdAt).toLocaleString()}</time></div>
+            <div className="emailMeta">
+              <div className="avatar">{initials(m.fromName||m.fromAddress)}</div>
+              <div className="sender">
+                <b>{m.fromName||m.fromAddress}</b>
+                <span>&lt;{m.fromAddress}&gt;</span>
+                <small>to {m.toAddresses.join(', ')}</small>
+              </div>
+              <time>{new Date(m.createdAt).toLocaleString([], {dateStyle:'medium',timeStyle:'short'})}</time>
+            </div>
             {m.htmlBody ? <iframe title={m.subject} sandbox="" srcDoc={m.htmlBody}/> : <div className="plainBody">{m.textBody||'(empty message)'}</div>}
-            {!!m.attachments.length&&<div className="attachments">{m.attachments.map(a=><button className="attachmentButton" key={a.id} onClick={()=>void openAttachment(a.id)}><span>▧</span><div><b>{a.filename}</b><small>{a.sizeBytes?formatBytes(a.sizeBytes):a.contentType}</small></div></button>)}</div>}
-            <div className="emailActions"><button onClick={()=>reply(m)}>↩ Reply</button></div>
+            {!!m.attachments.length&&<div className="attachments">{m.attachments.map(a=><button className="attachmentButton" key={a.id} onClick={()=>void openAttachment(a.id)}>
+              <span className="attachmentIcon"><MailIcon name="attach" size={19}/></span>
+              <div><b>{a.filename}</b><small>{a.sizeBytes?formatBytes(a.sizeBytes):a.contentType}</small></div>
+            </button>)}</div>}
+            <div className="emailActions"><button onClick={()=>reply(m)}><MailIcon name="reply" size={18}/>Reply</button></div>
           </article>)}</div>
         </section>}
       </div>
     </main>
 
+    {!thread&&<nav className="mobileBottomNav" aria-label="Primary navigation">
+      <MobileNavButton active={folder==='inbox'} icon="inbox" label="Inbox" onClick={()=>selectFolder('inbox')} badge={unread||undefined}/>
+      <MobileNavButton active={folder==='starred'} icon="star" label="Starred" onClick={()=>selectFolder('starred')}/>
+      <button className="mobileComposeButton" onClick={newCompose} aria-label="Compose">
+        <MailIcon name="compose" size={23}/>
+      </button>
+      <MobileNavButton active={folder==='sent'} icon="send" label="Sent" onClick={()=>selectFolder('sent')}/>
+      <MobileNavButton active={mobileFoldersOpen} icon="more" label="More" onClick={()=>setMobileFoldersOpen(true)}/>
+    </nav>}
+
+    {mobileFoldersOpen&&<div className="mobileSheetBackdrop" onClick={e=>{if(e.currentTarget===e.target)setMobileFoldersOpen(false);}}>
+      <section className="mobileFolderSheet" aria-label="Folders and accounts">
+        <div className="sheetHandle"/>
+        <div className="sheetHeader">
+          <div><strong>GIBP Mail</strong><span>Folders & accounts</span></div>
+          <button onClick={()=>setMobileFoldersOpen(false)} aria-label="Close"><MailIcon name="close"/></button>
+        </div>
+        <div className="sheetFolders">{folders.map(f=><button key={f.id} className={folder===f.id?'active':''} onClick={()=>selectFolder(f.id)}>
+          <span className="sheetFolderIcon"><MailIcon name={f.icon} size={21}/></span>
+          <span>{f.label}</span>
+          {f.id==='inbox'&&unread>0&&<b>{unread}</b>}
+          {f.id==='outbox'&&status?.queued ? <b>{status.queued}</b>:null}
+        </button>)}</div>
+        {!!identities.length&&<div className="sheetIdentities">
+          <small>IDENTITIES</small>
+          {identities.slice(0,4).map(i=><div key={i.address}>
+            <span className="identityAvatar">{initials(i.name||i.address)}</span>
+            <p><b>{i.name||'GIBP'}</b><em>{i.address}</em></p>
+          </div>)}
+        </div>}
+        <button className="sheetSettings" onClick={()=>{setMobileFoldersOpen(false);setSettingsOpen(true);}}>
+          <MailIcon name="settings" size={20}/><span>Settings</span>
+        </button>
+        <div className="sheetStatus"><span className={status?.configured?'health good':'health bad'}/>{status?.configured?'Resend connected':'Resend not configured'}</div>
+      </section>
+    </div>}
+
     {compose&&<Compose value={compose} identities={identities} busy={busy} onChange={setCompose} onClose={()=>setCompose(null)} onSend={()=>void send()}/>}
+    {settingsOpen&&<SettingsPanel onClose={()=>setSettingsOpen(false)} onChanged={()=>void Promise.all([api<Identity[]>('/api/identities').then(setIdentities),refreshStatus(),loadList()])} onError={setError}/>}
   </div>
 }
 
-function Empty({label}:{label:string}) { return <div className="empty"><div>✉</div><b>{label}</b><span>GIBP Mail stores your mailbox locally on this device.</span></div>; }
+function MobileNavButton({active,icon,label,onClick,badge}:{active:boolean;icon:MailIconName;label:string;onClick:()=>void;badge?:number}){
+  return <button className={active?'active':''} onClick={onClick} aria-label={label}>
+    <span className="bottomIcon"><MailIcon name={icon} size={22}/>{badge?<b>{badge>99?'99+':badge}</b>:null}</span>
+    <small>{label}</small>
+  </button>;
+}
+
+function Empty({label}:{label:string}) {
+  return <div className="empty">
+    <div className="emptyIcon"><MailIcon name="mail" size={28}/></div>
+    <b>{label}</b>
+    <span>Mail is stored privately on this device.</span>
+  </div>;
+}
 
 function Compose({value,identities,busy,onChange,onClose,onSend}:{value:ComposeState;identities:Identity[];busy:boolean;onChange:(v:ComposeState)=>void;onClose:()=>void;onSend:()=>void}) {
-  return <div className="compose">
-    <div className="composeHead"><b>{value.replyToMessageId?'Reply':'New message'}</b><button onClick={onClose}>×</button></div>
-    <div className="field"><label>From</label><input list="gibp-from-identities" value={value.from} onChange={e=>onChange({...value,from:e.target.value.trim()})} placeholder="name@verified-domain"/><datalist id="gibp-from-identities">{identities.map(i=><option key={i.address} value={i.address}>{i.formatted}</option>)}</datalist></div>
-    <div className="field"><label>To</label><input autoFocus value={value.to} onChange={e=>onChange({...value,to:e.target.value})} placeholder="name@example.com"/></div>
-    <details><summary>Cc / Bcc</summary><div className="field"><label>Cc</label><input value={value.cc} onChange={e=>onChange({...value,cc:e.target.value})}/></div><div className="field"><label>Bcc</label><input value={value.bcc} onChange={e=>onChange({...value,bcc:e.target.value})}/></div></details>
-    <input className="subject" value={value.subject} onChange={e=>onChange({...value,subject:e.target.value})} placeholder="Subject"/>
-    <textarea value={value.text} onChange={e=>onChange({...value,text:e.target.value})} placeholder="Write your message…"/>
-    {!!value.attachments.length&&<div className="composeFiles">{value.attachments.map((f,i)=><span key={i}>{f.name}<button onClick={()=>onChange({...value,attachments:value.attachments.filter((_,x)=>x!==i)})}>×</button></span>)}</div>}
-    <div className="composeFoot"><button className="sendBtn" disabled={busy||!csv(value.to).length||!value.from} onClick={onSend}>{busy?'Sending…':'Send'} <span>↗</span></button>
-      <label className="attachBtn">⌕<input type="file" multiple onChange={e=>onChange({...value,attachments:[...value.attachments,...Array.from(e.target.files||[])]})}/></label>
-      <span className="saved">Saved locally</span>
-    </div>
+  return <div className="composeBackdrop">
+    <section className="compose">
+      <div className="composeHead">
+        <button className="composeClose" onClick={onClose} aria-label="Close compose"><MailIcon name="close"/></button>
+        <b>{value.replyToMessageId?'Reply':'New message'}</b>
+        <button className="composeSendTop" disabled={busy||!csv(value.to).length||!value.from} onClick={onSend}>
+          {busy?'Sending…':'Send'}<MailIcon name="send" size={18}/>
+        </button>
+      </div>
+      <div className="field"><label>From</label><input list="gibp-from-identities" value={value.from} onChange={e=>onChange({...value,from:e.target.value.trim()})} placeholder="name@verified-domain"/><datalist id="gibp-from-identities">{identities.map(i=><option key={i.address} value={i.address}>{i.formatted}</option>)}</datalist></div>
+      <div className="field"><label>To</label><input autoFocus value={value.to} onChange={e=>onChange({...value,to:e.target.value})} placeholder="name@example.com"/></div>
+      <details><summary>Cc / Bcc</summary><div className="field"><label>Cc</label><input value={value.cc} onChange={e=>onChange({...value,cc:e.target.value})}/></div><div className="field"><label>Bcc</label><input value={value.bcc} onChange={e=>onChange({...value,bcc:e.target.value})}/></div></details>
+      <input className="subject" value={value.subject} onChange={e=>onChange({...value,subject:e.target.value})} placeholder="Subject"/>
+      <textarea value={value.text} onChange={e=>onChange({...value,text:e.target.value})} placeholder="Write your message…"/>
+      {!!value.attachments.length&&<div className="composeFiles">{value.attachments.map((f,i)=><span key={i}>{f.name}<button onClick={()=>onChange({...value,attachments:value.attachments.filter((_,x)=>x!==i)})} aria-label={`Remove ${f.name}`}><MailIcon name="close" size={15}/></button></span>)}</div>}
+      <div className="composeFoot">
+        <button className="sendBtn" disabled={busy||!csv(value.to).length||!value.from} onClick={onSend}>{busy?'Sending…':'Send'}<MailIcon name="send" size={17}/></button>
+        <label className="attachBtn" aria-label="Attach files"><MailIcon name="attach" size={21}/><input type="file" multiple onChange={e=>onChange({...value,attachments:[...value.attachments,...Array.from(e.target.files||[])]})}/></label>
+        <span className="saved"><MailIcon name="check" size={15}/>Saved locally</span>
+      </div>
+    </section>
   </div>
 }
 
