@@ -5,7 +5,7 @@ import { accountForSender, flushMobileOutbox, refreshDomains, queueAndSend, sync
 import { configureAi, createDefaultRule, evaluateInbound, reconcileCampaignReplies, runCampaignTick } from './automation.js';
 import { pushAllReplicas, pushReplicaTarget } from './replica.js';
 import { configureBackgroundAccount, removeBackgroundAccount, configureBackgroundAutomation, setBackgroundAutomationMode, setBackgroundSuppressions, setBackgroundForegroundAudit, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
-import { analyzeInbound, attentionBriefing, composeContext, createReminder, languageTransform, markWaiting, smartSearch, snoozeThread } from './intelligence.js';
+import { analyzeInbound, attentionBriefing, composeContext, createReminder, languageTransform, markWaiting, smartSearch, snoozeThread, summarizeAttachment } from './intelligence.js';
 import { cancelScheduled, configureEventRelay, flushScheduledSends, listScheduled, recordDeliveryEvent, scheduleSend, syncEventRelay } from './scheduler.js';
 
 let syncing=false;
@@ -341,6 +341,8 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
   if(path==='/api/delivery-events'&&method==='POST')return await recordDeliveryEvent(body) as T;
   if(path==='/api/intelligence/briefing'&&method==='GET')return await attentionBriefing() as T;
   if(path==='/api/intelligence/search'&&method==='POST')return await smartSearch(String(body.query||'')) as T;
+  const attachmentSummaryMatch=path.match(/^\/api\/attachments\/([^/]+)\/summary$/);
+  if(attachmentSummaryMatch&&method==='POST')return await summarizeAttachment(decodeURIComponent(attachmentSummaryMatch[1])) as T;
   if(path==='/api/language'&&method==='POST')return await languageTransform({
     text:String(body.text||''),sourceLanguage:body.sourceLanguage?String(body.sourceLanguage):undefined,
     targetLanguage:String(body.targetLanguage||'English'),mode:body.mode?String(body.mode):undefined,tone:body.tone?String(body.tone):undefined,
