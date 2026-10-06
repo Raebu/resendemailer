@@ -36,7 +36,7 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - run: npm install
+      - run: npm ci
       - run: npm run security:scan
       - run: npm run build
 
