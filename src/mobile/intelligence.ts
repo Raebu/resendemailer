@@ -53,6 +53,29 @@ async function deterministicRoute(message:any,alias:AliasRow|null,intel:Partial<
   return out;
 }
 
+export async function resolveOutboundAlias(addressInput:string):Promise<AliasRow|null>{
+  const address=parseEmail(addressInput),d=domain(address);
+  const account=await one<{account_id:string}>("SELECT account_id FROM domains WHERE domain=? AND status='verified' AND can_send=1 LIMIT 1",[d]);
+  if(!account)return null;
+  const rows=await all<AliasRow>('SELECT * FROM aliases WHERE enabled=1 AND account_id=? ORDER BY is_dynamic ASC,created_at ASC',[account.account_id]);
+  const exact=rows.find(a=>lower(a.address)===address);if(exact)return exact;
+  const inherited=rows.find(a=>a.pattern&&wildcard(a.pattern.includes('@')?a.pattern:`${a.pattern}@${d}`,address));
+  const id=uid('alias_'),now=isoNow();
+  await run(`INSERT OR IGNORE INTO aliases(id,account_id,address,pattern,persona,tone,default_language,folder,notification_priority,ai_mode,signature_id,forward_to_json,is_dynamic,enabled,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,1,?,?)`,[
+      id,account.account_id,address,null,inherited?.persona||null,inherited?.tone||null,inherited?.default_language||'auto',
+      inherited?.folder||null,inherited?.notification_priority||'normal',inherited?.ai_mode||'inherit',
+      inherited?.signature_id||null,inherited?.forward_to_json||'[]',now,now
+    ]);
+  return one<AliasRow>('SELECT * FROM aliases WHERE account_id=? AND address=?',[account.account_id,address]);
+}
+export async function composeContext(address:string){
+  const alias=await resolveOutboundAlias(address);
+  const signature=alias?.signature_id?await one<any>('SELECT * FROM signatures WHERE id=?',[alias.signature_id]):null;
+  const templates=await all<any>('SELECT * FROM templates WHERE alias_pattern IS NULL OR alias_pattern=? OR ? LIKE replace(alias_pattern,\'*\',\'%\') ORDER BY name',[alias?.address||address,alias?.address||address]);
+  return{alias,signature,templates};
+}
+
 export async function analyzeInbound(messageId:string){
   const m=await one<any>("SELECT * FROM messages WHERE id=? AND direction='inbound'",[messageId]);if(!m)return null;
   const alias=await resolveAlias(m);let intel:Partial<Intel>={};
