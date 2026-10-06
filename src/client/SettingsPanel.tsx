@@ -66,6 +66,8 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
 
   const [aiUrl, setAiUrl] = useState('');
   const [aiToken, setAiToken] = useState('');
+  const [eventRelayUrl,setEventRelayUrl]=useState('');
+  const [eventRelayToken,setEventRelayToken]=useState('');
 
   const [replicaName, setReplicaName] = useState('Garuda PC');
   const [replicaUrl, setReplicaUrl] = useState('');
@@ -148,6 +150,14 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
       body: JSON.stringify({ url: aiUrl.trim(), token: aiToken.trim() }),
     });
     setAiToken('');
+  });
+
+  const saveEventRelay=()=>action(async()=>{
+    if(!/^https:\/\//i.test(eventRelayUrl))throw new Error('Event relay must use HTTPS.');
+    if(!eventRelayToken.trim())throw new Error('Event relay token is required.');
+    await api('/api/event-relay/config',{method:'POST',body:JSON.stringify({url:eventRelayUrl.trim(),token:eventRelayToken.trim()})});
+    await api('/api/event-relay/sync',{method:'POST'});
+    setEventRelayToken('');
   });
 
   const updateRule = (rule: Rule, mode: Rule['mode']) => action(async () => {
@@ -352,6 +362,14 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
               {signatures.map(s=><article key={s.id}><div><b>{s.name}</b><small>{String(s.text_body||'').split('\n')[0]}</small></div><span className="pill ok">Signature</span></article>)}
               {templates.map(t=><article key={t.id}><div><b>{t.name}</b><small>{t.subject||'No subject'}{t.language?` • ${t.language}`:''}</small></div><span className="pill ok">Template</span></article>)}
             </div>
+          </section>
+
+          <section className="settingsCard">
+            <h3><MailIcon name="priority" size={18}/>Delivery intelligence</h3>
+            <p>Optional Resend webhook relay for delivered/bounced/complaint/unsubscribe events. Only minimal event metadata is retained; message bodies never enter the relay.</p>
+            <input className={inputClass} value={eventRelayUrl} onChange={e=>setEventRelayUrl(e.target.value)} placeholder="https://gibp-mail-event-relay.…workers.dev"/>
+            <input className={inputClass} type="password" value={eventRelayToken} onChange={e=>setEventRelayToken(e.target.value)} placeholder="Event relay bearer token"/>
+            <button className="settingsPrimary" disabled={busy} onClick={()=>void saveEventRelay()}>Connect event relay</button>
           </section>
 
           <section className="settingsCard">
