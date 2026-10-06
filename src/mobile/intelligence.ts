@@ -1,5 +1,6 @@
 import { CapacitorHttp } from '@capacitor/core';
 import { all, isoNow, json, one, run, uid } from './db.js';
+import { queueAndSend } from './sync.js';
 
 type AliasRow={id:string;account_id:string;address:string;pattern:string|null;persona:string|null;tone:string|null;default_language:string;folder:string|null;notification_priority:string;ai_mode:string;signature_id:string|null;forward_to_json:string;is_dynamic:number};
 type Intel={category:string;priority:string;needs_reply:boolean;needs_me:boolean;waiting:boolean;language:string;why_it_matters:string;summary:string;actions:any[];deadline_at:string|null;labels:string[];confidence:number;sensitive:boolean};
@@ -45,10 +46,10 @@ function matchRule(c:any,ctx:any){
 }
 async function deterministicRoute(message:any,alias:AliasRow|null,intel:Partial<Intel>){
   const ctx={to:alias?.address||json<string[]>(message.to_json,[])[0]||'',from:parseEmail(message.from_address),subject:message.subject||'',body:message.text_body||message.preview||'',hasAttachment:Boolean(await one('SELECT 1 x FROM attachments WHERE message_id=? LIMIT 1',[message.id]))};
-  const out:any={priority:intel.priority||'normal',needsReply:Boolean(intel.needs_reply),needsMe:Boolean(intel.needs_me),waiting:Boolean(intel.waiting),labels:Array.isArray(intel.labels)?intel.labels:[],archive:false,snooze:null,reminder:null};
+  const out:any={priority:intel.priority||'normal',needsReply:Boolean(intel.needs_reply),needsMe:Boolean(intel.needs_me),waiting:Boolean(intel.waiting),labels:Array.isArray(intel.labels)?intel.labels:[],archive:false,snooze:null,reminder:null,forwardTo:alias?json<string[]>(alias.forward_to_json,[]):[]};
   for(const r of await all<any>('SELECT * FROM routing_rules WHERE enabled=1 ORDER BY priority,created_at')){
     const c=json<any>(r.conditions_json,{});if(!matchRule(c,ctx))continue;const a=json<any>(r.actions_json,{});
-    if(a.priority)out.priority=a.priority;if(a.label)out.labels=[...new Set([...out.labels,a.label])];if(a.needsReply!==undefined)out.needsReply=!!a.needsReply;if(a.needsMe!==undefined)out.needsMe=!!a.needsMe;if(a.waiting!==undefined)out.waiting=!!a.waiting;if(a.archive!==undefined)out.archive=!!a.archive;if(a.snoozeUntil)out.snooze=a.snoozeUntil;if(a.reminderAt)out.reminder=a.reminderAt;if(r.stop_processing)break;
+    if(a.priority)out.priority=a.priority;if(a.label)out.labels=[...new Set([...out.labels,a.label])];if(a.needsReply!==undefined)out.needsReply=!!a.needsReply;if(a.needsMe!==undefined)out.needsMe=!!a.needsMe;if(a.waiting!==undefined)out.waiting=!!a.waiting;if(a.archive!==undefined)out.archive=!!a.archive;if(a.snoozeUntil)out.snooze=a.snoozeUntil;if(a.reminderAt)out.reminder=a.reminderAt;if(a.forwardTo)out.forwardTo=[...new Set([...out.forwardTo,...(Array.isArray(a.forwardTo)?a.forwardTo:[a.forwardTo])].map(String))];if(r.stop_processing)break;
   }
   return out;
 }
@@ -90,6 +91,16 @@ export async function analyzeInbound(messageId:string){
   if(route.reminder)await createReminder(m.thread_id,m.id,'follow_up',String(route.reminder),'Routing rule follow-up');
   if(final.deadline_at)await createReminder(m.thread_id,m.id,'deadline',final.deadline_at,final.why_it_matters||'Email deadline');
   const email=parseEmail(m.from_address);if(email.includes('@'))await run(`INSERT INTO contact_memory(email,name,preferred_language,last_thread_id,last_contact_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET name=coalesce(excluded.name,contact_memory.name),preferred_language=coalesce(excluded.preferred_language,contact_memory.preferred_language),last_thread_id=excluded.last_thread_id,last_contact_at=excluded.last_contact_at,updated_at=excluded.updated_at`,[email,m.from_name||null,final.language==='unknown'?null:final.language,m.thread_id,m.created_at||now,now]);
+  const forwardTo=(route.forwardTo||[]).map((x:string)=>parseEmail(x)).filter((x:string)=>x.includes('@')&&x!==parseEmail(m.from_address)&&x!==alias?.address);
+  if(alias&&forwardTo.length){
+    await queueAndSend({
+      localId:`routefwd_${m.id}`,
+      from:alias.address,
+      to:[...new Set(forwardTo)],
+      subject:/^fwd:/i.test(m.subject||'')?m.subject:`Fwd: ${m.subject||'(no subject)'}`,
+      text:`Forwarded automatically by GIBP Mail routing.\n\nFrom: ${m.from_address}\nTo: ${json<string[]>(m.to_json,[]).join(', ')}\nSubject: ${m.subject||''}\n\n${m.text_body||m.preview||''}`,
+    });
+  }
   return final;
 }
 
