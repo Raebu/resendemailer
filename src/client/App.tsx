@@ -15,6 +15,9 @@ type ComposeState = {
 
 const folders: {id:Folder; label:string; icon:MailIconName}[] = [
   {id:'inbox',label:'Inbox',icon:'inbox'},
+  {id:'needs_me',label:'Needs Me',icon:'priority'},
+  {id:'waiting',label:'Waiting',icon:'clock'},
+  {id:'snoozed',label:'Snoozed',icon:'snooze'},
   {id:'starred',label:'Starred',icon:'star'},
   {id:'sent',label:'Sent',icon:'send'},
   {id:'drafts',label:'Drafts',icon:'draft'},
