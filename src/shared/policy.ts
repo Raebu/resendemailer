@@ -36,3 +36,32 @@ export function addressDomain(address:string):string|null{
 export function normalizedEmail(address:string):string{
   return address.trim().toLowerCase();
 }
+
+
+const STOP_PHRASES = [
+  'unsubscribe',
+  'do not contact',
+  'stop emailing',
+  'remove me',
+] as const;
+
+export function containsStopLanguage(value:string):boolean{
+  const text=value.toLowerCase();
+  return STOP_PHRASES.some(phrase=>text.includes(phrase));
+}
+
+export function autoReplyLocalId(accountId:string,providerMessageId:string):string{
+  return `reply_${accountId}_${providerMessageId}`;
+}
+
+export function campaignSendLocalId(campaignId:string,contactId:string,step:number):string{
+  if(!Number.isInteger(step)||step<0)throw new Error('Campaign step must be a non-negative integer');
+  return `bd_${campaignId}_${contactId}_${step}`;
+}
+
+export function campaignWithinGlobalHourlyCap(sentLastHour:number,cap=25):boolean{
+  return Number.isFinite(sentLastHour)
+    && Number.isFinite(cap)
+    && cap>0
+    && sentLastHour<cap;
+}
