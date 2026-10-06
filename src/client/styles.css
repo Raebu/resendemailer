@@ -433,3 +433,19 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .attachmentSummary ul{margin:4px 0 8px;padding-left:20px}
 .aliasColorField{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .aliasColorField input[type="color"]{width:42px;height:32px;padding:2px;border:1px solid var(--line);border-radius:8px;background:transparent}
+
+
+/* Thread and contact intelligence */
+.threadAssistCard,.contactTimelineCard{margin:12px 16px 0;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2);display:flex;flex-direction:column;gap:10px}
+.threadAssistCard>div:first-child,.contactTimelineCard>div:first-child{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.threadAssistCard>div:first-child b{display:inline-flex;align-items:center;gap:6px}
+.threadAssistCard>div:first-child span,.contactTimelineCard>div:first-child span,.contactTimelineCard>div:first-child small{opacity:.7}
+.threadAssistCard p{margin:0;line-height:1.5}
+.suggestedReplies{display:grid;gap:8px}
+.suggestedReplies button{display:grid;grid-template-columns:1fr auto;gap:3px 10px;text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:var(--surface);cursor:pointer}
+.suggestedReplies button span{grid-column:1/-1;white-space:pre-wrap;line-height:1.4}
+.suggestedReplies button small{opacity:.65}
+.contactTimelineRows{display:grid;gap:6px}
+.contactTimelineRows button{display:grid;grid-template-columns:1fr auto;gap:2px 10px;text-align:left;padding:9px 10px;border:0;border-radius:9px;background:var(--surface);cursor:pointer}
+.contactTimelineRows button span{grid-column:1/-1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.72}
+.contactTimelineRows time{font-size:.78rem;opacity:.65}
