@@ -415,25 +415,95 @@ function Empty({label}:{label:string}) {
   </div>;
 }
 
-function Compose({value,identities,busy,onChange,onClose,onSend}:{value:ComposeState;identities:Identity[];busy:boolean;onChange:(v:ComposeState)=>void;onClose:()=>void;onSend:()=>void}) {
+function Compose({value,identities,busy,onChange,onClose,onSend}:{value:ComposeState;identities:Identity[];busy:boolean;onChange:(v:ComposeState)=>void;onClose:()=>void;onSend:(options?:{scheduledAt?:string;undoSeconds?:number})=>void}) {
+  const languages=['English','Nepali','Hindi','French','German','Spanish','Arabic','Chinese','Japanese','Portuguese','Italian','Dutch','Bengali','Urdu','Korean'];
+  const [targetLanguage,setTargetLanguage]=useState(value.language||'English');
+  const [tone,setTone]=useState('professional');
+  const [backTranslation,setBackTranslation]=useState('');
+  const [aiBusy,setAiBusy]=useState(false);
+  const [scheduleOpen,setScheduleOpen]=useState(false);
+  const [scheduledAt,setScheduledAt]=useState('');
+  const [undoSeconds,setUndoSeconds]=useState(10);
+  const [context,setContext]=useState<any>(null);
+
+  useEffect(()=>{
+    if(!value.from)return;
+    const t=window.setTimeout(()=>{
+      void api<any>('/api/compose/context',{method:'POST',body:JSON.stringify({from:value.from})}).then(setContext).catch(()=>setContext(null));
+    },250);
+    return()=>window.clearTimeout(t);
+  },[value.from]);
+
+  const transform=async(mode:'translate'|'improve'|'bilingual')=>{
+    if(!value.text.trim())return;
+    setAiBusy(true);
+    try{
+      const result=await api<{text:string;back_translation?:string;backTranslation?:string}>('/api/language',{method:'POST',body:JSON.stringify({
+        text:value.text,sourceLanguage:'auto',targetLanguage,mode,tone
+      })});
+      onChange({...value,text:result.text,language:targetLanguage});
+      setBackTranslation(result.back_translation||result.backTranslation||'');
+    }finally{setAiBusy(false);}
+  };
+  const applyTemplate=(template:any)=>{
+    onChange({...value,subject:template.subject||value.subject,text:template.text_body||value.text,language:template.language||value.language});
+  };
+  const dictate=()=>{
+    const Ctor=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition;
+    if(!Ctor)return;
+    const recognition=new Ctor();
+    recognition.lang='en-GB';
+    recognition.interimResults=false;
+    recognition.maxAlternatives=1;
+    recognition.onresult=(event:any)=>{
+      const text=event.results?.[0]?.[0]?.transcript||'';
+      if(text)onChange({...value,text:`${value.text}${value.text?' ':''}${text}`});
+    };
+    recognition.start();
+  };
+  const speechAvailable=Boolean((window as any).SpeechRecognition||(window as any).webkitSpeechRecognition);
+
   return <div className="composeBackdrop">
     <section className="compose">
       <div className="composeHead">
         <button className="composeClose" onClick={onClose} aria-label="Close compose"><MailIcon name="close"/></button>
         <b>{value.replyToMessageId?'Reply':'New message'}</b>
-        <button className="composeSendTop" disabled={busy||!csv(value.to).length||!value.from} onClick={onSend}>
+        <button className="composeSendTop" disabled={busy||!csv(value.to).length||!value.from} onClick={()=>onSend({undoSeconds})}>
           {busy?'Sending…':'Send'}<MailIcon name="send" size={18}/>
         </button>
       </div>
+      {context?.alias&&<div className="personaBar"><MailIcon name="sparkles" size={15}/><span>{context.alias.address}</span>{context.alias.persona&&<b>{context.alias.persona}</b>}{context.alias.tone&&<em>{context.alias.tone}</em>}{context.signature&&<small>Signature: {context.signature.name}</small>}</div>}
       <div className="field"><label>From</label><input list="gibp-from-identities" value={value.from} onChange={e=>onChange({...value,from:e.target.value.trim()})} placeholder="name@verified-domain"/><datalist id="gibp-from-identities">{identities.map(i=><option key={i.address} value={i.address}>{i.formatted}</option>)}</datalist></div>
       <div className="field"><label>To</label><input autoFocus value={value.to} onChange={e=>onChange({...value,to:e.target.value})} placeholder="name@example.com"/></div>
       <details><summary>Cc / Bcc</summary><div className="field"><label>Cc</label><input value={value.cc} onChange={e=>onChange({...value,cc:e.target.value})}/></div><div className="field"><label>Bcc</label><input value={value.bcc} onChange={e=>onChange({...value,bcc:e.target.value})}/></div></details>
       <input className="subject" value={value.subject} onChange={e=>onChange({...value,subject:e.target.value})} placeholder="Subject"/>
-      <textarea value={value.text} onChange={e=>onChange({...value,text:e.target.value})} placeholder="Write your message…"/>
+      <div className="composeAiBar">
+        <select value={targetLanguage} onChange={e=>setTargetLanguage(e.target.value)} aria-label="Target language">
+          {languages.map(l=><option key={l}>{l}</option>)}
+        </select>
+        <select value={tone} onChange={e=>setTone(e.target.value)} aria-label="Tone">
+          <option value="professional">Professional</option><option value="formal">Formal</option><option value="friendly">Friendly</option>
+          <option value="banking">Banking</option><option value="partnership">Partnership</option><option value="support">Support</option><option value="sales">Sales</option>
+        </select>
+        <button disabled={aiBusy||!value.text.trim()} onClick={()=>void transform('translate')}><MailIcon name="language" size={16}/>Translate</button>
+        <button disabled={aiBusy||!value.text.trim()} onClick={()=>void transform('improve')}><MailIcon name="sparkles" size={16}/>Improve</button>
+        <button disabled={aiBusy||!value.text.trim()} onClick={()=>void transform('bilingual')}>Bilingual</button>
+        {speechAvailable&&<button onClick={dictate}><MailIcon name="mic" size={16}/>Dictate</button>}
+      </div>
+      {!!context?.templates?.length&&<div className="templateBar"><span>Templates</span>{context.templates.slice(0,5).map((t:any)=><button key={t.id} onClick={()=>applyTemplate(t)}>{t.name}</button>)}</div>}
+      <textarea value={value.text} onChange={e=>{onChange({...value,text:e.target.value});setBackTranslation('');}} placeholder="Write your message…"/>
+      {backTranslation&&<div className="backTranslation"><b>English back-translation</b><span>{backTranslation}</span></div>}
       {!!value.attachments.length&&<div className="composeFiles">{value.attachments.map((f,i)=><span key={i}>{f.name}<button onClick={()=>onChange({...value,attachments:value.attachments.filter((_,x)=>x!==i)})} aria-label={`Remove ${f.name}`}><MailIcon name="close" size={15}/></button></span>)}</div>}
+      {scheduleOpen&&<div className="scheduleBar">
+        <label>Send at <input type="datetime-local" value={scheduledAt} onChange={e=>setScheduledAt(e.target.value)}/></label>
+        <label>Undo <select value={undoSeconds} onChange={e=>setUndoSeconds(Number(e.target.value))}><option value={0}>Off</option><option value={5}>5 sec</option><option value={10}>10 sec</option><option value={15}>15 sec</option></select></label>
+        <button disabled={!scheduledAt||busy} onClick={()=>onSend({scheduledAt:new Date(scheduledAt).toISOString(),undoSeconds:0})}>Schedule</button>
+      </div>}
       <div className="composeFoot">
-        <button className="sendBtn" disabled={busy||!csv(value.to).length||!value.from} onClick={onSend}>{busy?'Sending…':'Send'}<MailIcon name="send" size={17}/></button>
+        <button className="sendBtn" disabled={busy||!csv(value.to).length||!value.from} onClick={()=>onSend({undoSeconds})}>{busy?'Sending…':'Send'}<MailIcon name="send" size={17}/></button>
         <label className="attachBtn" aria-label="Attach files"><MailIcon name="attach" size={21}/><input type="file" multiple onChange={e=>onChange({...value,attachments:[...value.attachments,...Array.from(e.target.files||[])]})}/></label>
+        <button className="attachBtn" onClick={()=>setScheduleOpen(v=>!v)} aria-label="Send later"><MailIcon name="clock" size={21}/></button>
+        <span className="undoSetting">Undo: {undoSeconds?`${undoSeconds}s`:'off'}</span>
         <span className="saved"><MailIcon name="check" size={15}/>Saved locally</span>
       </div>
     </section>
