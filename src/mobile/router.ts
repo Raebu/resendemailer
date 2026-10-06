@@ -5,7 +5,7 @@ import { accountForSender, flushMobileOutbox, refreshDomains, queueAndSend, sync
 import { configureAi, createDefaultRule, evaluateInbound, reconcileCampaignReplies, runCampaignTick } from './automation.js';
 import { pushAllReplicas, pushReplicaTarget } from './replica.js';
 import { configureBackgroundAccount, removeBackgroundAccount, configureBackgroundAutomation, setBackgroundAutomationMode, setBackgroundSuppressions, setBackgroundForegroundAudit, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
-import { analyzeInbound, attentionBriefing, createReminder, languageTransform, markWaiting, smartSearch, snoozeThread } from './intelligence.js';
+import { analyzeInbound, attentionBriefing, composeContext, createReminder, languageTransform, markWaiting, smartSearch, snoozeThread } from './intelligence.js';
 import { cancelScheduled, flushScheduledSends, listScheduled, recordDeliveryEvent, scheduleSend } from './scheduler.js';
 
 let syncing=false;
@@ -223,6 +223,17 @@ async function addCampaignContacts(campaignId:string,body:any):Promise<any>{
   return{added};
 }
 
+async function decorateOutgoing(body:any):Promise<any>{
+  const from=String(body.from||'').trim();
+  if(!from)return body;
+  const ctx=await composeContext(from);
+  if(body.applySignature===false||!ctx.signature?.text_body)return body;
+  const signature=String(ctx.signature.text_body||'').trim();
+  const text=String(body.text||'');
+  if(!signature||text.includes(signature))return body;
+  return{...body,text:`${text.trimEnd()}\n\n${signature}`};
+}
+
 export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Promise<T>{
   await createDefaultRule();
   const url=new URL(rawUrl,'https://local.gibp.invalid');
@@ -309,11 +320,13 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
   }
   if(path.startsWith('/api/drafts/')&&method==='DELETE'){await run('DELETE FROM drafts WHERE id=?',[decodeURIComponent(path.split('/').pop()!)]);return{ok:true} as T;}
   if(path==='/api/send'&&method==='POST'){
+    const payload=await decorateOutgoing(body);
     const undo=Math.max(0,Math.min(30,Number(body.undoSeconds||0)));
     const scheduledAt=body.scheduledAt?String(body.scheduledAt):null;
-    if(undo>0||scheduledAt)return await scheduleSend(body,scheduledAt||new Date().toISOString(),undo) as T;
-    return await queueAndSend(body) as T;
+    if(undo>0||scheduledAt)return await scheduleSend(payload,scheduledAt||new Date().toISOString(),undo) as T;
+    return await queueAndSend(payload) as T;
   }
+  if(path==='/api/compose/context'&&method==='POST')return await composeContext(String(body.from||'')) as T;
   if(path==='/api/scheduled'&&method==='GET')return await listScheduled() as T;
   if(path==='/api/scheduled'&&method==='POST')return await scheduleSend(body.payload||body,String(body.scheduledAt),Number(body.undoSeconds||0)) as T;
   const undoMatch=path.match(/^\/api\/scheduled\/([^/]+)\/cancel$/);
