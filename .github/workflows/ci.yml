@@ -14,10 +14,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - run: npm ci
-      - run: npm run security:scan
+      - run: CHECK_GIT_HISTORY=1 npm run security:scan
       - run: npm run check
       - run: npm run worker:check
