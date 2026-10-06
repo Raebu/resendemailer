@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "build/**"]
+    branches: [main, "build/**", "hardening/**"]
   pull_request:
 
 permissions:
@@ -18,4 +18,5 @@ jobs:
         with:
           node-version: 24
       - run: npm install
+      - run: npm run security:scan
       - run: npm run check
