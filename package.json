@@ -16,7 +16,8 @@
     "android:debug": "npm run android:sync && cd android && ./gradlew assembleDebug",
     "security:scan": "bash scripts/check-secrets.sh",
     "preflight": "bash scripts/preflight.sh",
-    "android:install": "bash scripts/install-phone.sh"
+    "android:install": "bash scripts/install-phone.sh",
+    "worker:check": "bash scripts/check-worker.sh"
   },
   "engines": {
     "node": ">=22"
