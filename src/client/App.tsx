@@ -3,6 +3,7 @@ import type { Folder, Identity, MessageDetail, MessageSummary, Status, ThreadDet
 import { mailApi as api, openAttachment } from './mailApi.js';
 import { MailIcon, type MailIconName } from './MailIcon.js';
 import { SettingsPanel } from './SettingsPanel.js';
+import { IntelligencePanel } from './IntelligencePanel.js';
 
 type Draft = {
   id:string; replyToMessageId:string|null; fromIdentity:string; to:string[]; cc:string[]; bcc:string[];
@@ -10,11 +11,14 @@ type Draft = {
 };
 type ComposeState = {
   id?:string; replyToMessageId?:string|null; from:string; to:string; cc:string; bcc:string;
-  subject:string; text:string; attachments:File[];
+  subject:string; text:string; attachments:File[]; language?:string;
 };
 
 const folders: {id:Folder; label:string; icon:MailIconName}[] = [
   {id:'inbox',label:'Inbox',icon:'inbox'},
+  {id:'needs_me',label:'Needs Me',icon:'priority'},
+  {id:'waiting',label:'Waiting',icon:'clock'},
+  {id:'snoozed',label:'Snoozed',icon:'snooze'},
   {id:'starred',label:'Starred',icon:'star'},
   {id:'sent',label:'Sent',icon:'send'},
   {id:'drafts',label:'Drafts',icon:'draft'},
@@ -46,8 +50,14 @@ function App() {
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState<string|null>(null);
   const [settingsOpen,setSettingsOpen] = useState(false);
+  const [intelligenceOpen,setIntelligenceOpen] = useState(false);
   const [mobileFoldersOpen,setMobileFoldersOpen] = useState(false);
   const [mobileSearchOpen,setMobileSearchOpen] = useState(false);
+  const [translations,setTranslations] = useState<Record<string,{text:string;backTranslation:string}>>({});
+  const [attachmentSummaries,setAttachmentSummaries]=useState<Record<string,{summary:string;key_points:string[];actions:string[];risks:string[];language:string}>>({});
+  const [threadAssistData,setThreadAssistData]=useState<{summary:string;status:string;language:string;suggested_replies:Array<{label:string;body:string;tone:string}>}|null>(null);
+  const [contactTimelineData,setContactTimelineData]=useState<any>(null);
+  const [pendingUndo,setPendingUndo]=useState<{id:string;until:string}|null>(null);
   const draftTimer = useRef<number|null>(null);
   const mobileSearchRef = useRef<HTMLInputElement|null>(null);
 
@@ -83,7 +93,11 @@ function App() {
   };
   const openThread=async (m:MessageSummary)=>{
     const value=await api<ThreadDetail>(`/api/threads/${m.threadId}`);
-    setThread(value); void loadList();
+    setThreadAssistData(null);setContactTimelineData(null);setThread(value); void loadList();
+  };
+  const openThreadId=async(threadId:string)=>{
+    const value=await api<ThreadDetail>(`/api/threads/${threadId}`);
+    setIntelligenceOpen(false);setThreadAssistData(null);setContactTimelineData(null);setThread(value);void loadList();
   };
   const patch=async(id:string,body:Record<string,unknown>)=>{
     await api(`/api/messages/${id}`,{method:'PATCH',body:JSON.stringify(body)});
@@ -98,8 +112,8 @@ function App() {
   };
 
   const defaultIdentity=identities[0]?.address || '';
-  const newCompose=()=>setCompose({from:defaultIdentity,to:'',cc:'',bcc:'',subject:'',text:'',attachments:[]});
-  const reply=(m:MessageDetail)=>{
+  const newCompose=()=>setCompose({from:defaultIdentity,to:'',cc:'',bcc:'',subject:'',text:'',attachments:[],language:'English'});
+  const reply=(m:MessageDetail,prefill='')=>{
     const to=m.direction==='inbound'?m.fromAddress:(m.toAddresses[0]||'');
     const verifiedDomains=new Set(identities.map(i=>i.address.split('@')[1]?.toLowerCase()).filter(Boolean));
     const ownAddress=(m.direction==='inbound'
@@ -108,12 +122,12 @@ function App() {
     )||defaultIdentity;
     setCompose({
       replyToMessageId:m.id, from:ownAddress, to, cc:'', bcc:'',
-      subject:/^re:/i.test(m.subject)?m.subject:`Re: ${m.subject}`, text:'', attachments:[]
+      subject:/^re:/i.test(m.subject)?m.subject:`Re: ${m.subject}`, text:prefill, attachments:[], language:(m.language&&m.language!=='unknown')?m.language:'English'
     });
   };
   const openDraft=(d:Draft)=>setCompose({
     id:d.id, replyToMessageId:d.replyToMessageId, from:d.fromIdentity, to:d.to.join(', '),
-    cc:d.cc.join(', '),bcc:d.bcc.join(', '),subject:d.subject,text:d.textBody,attachments:[]
+    cc:d.cc.join(', '),bcc:d.bcc.join(', '),subject:d.subject,text:d.textBody,attachments:[],language:'English'
   });
 
   const persistDraft=useCallback(async(c:ComposeState)=>{
@@ -132,22 +146,82 @@ function App() {
     return()=>{ if(draftTimer.current) clearTimeout(draftTimer.current); };
   },[compose,persistDraft]);
 
-  const send=async()=>{
+  const send=async(options:{scheduledAt?:string;undoSeconds?:number}={})=>{
     if(!compose) return;
     setBusy(true); setError(null);
     try {
       const attachments=await Promise.all(compose.attachments.map(async f=>({
         filename:f.name,contentType:f.type||'application/octet-stream',base64:await fileToBase64(f)
       })));
-      const result=await api<{status:string;error?:string}>('/api/send',{method:'POST',body:JSON.stringify({
+      const result=await api<{id?:string;status:string;error?:string;undoUntil?:string;scheduledAt?:string}>('/api/send',{method:'POST',body:JSON.stringify({
         draftId:compose.id,from:compose.from,to:csv(compose.to),cc:csv(compose.cc),bcc:csv(compose.bcc),
-        subject:compose.subject,text:compose.text,replyToMessageId:compose.replyToMessageId??null,attachments
+        subject:compose.subject,text:compose.text,replyToMessageId:compose.replyToMessageId??null,attachments,
+        scheduledAt:options.scheduledAt,undoSeconds:options.undoSeconds||0,
       })});
       setCompose(null);
       if(result.status==='queued') setError(result.error ? `Queued locally: ${result.error}` : 'Queued locally and will send automatically when online.');
+      if(result.status==='scheduled'){
+        if(options.undoSeconds&&result.id&&result.undoUntil){
+          setPendingUndo({id:result.id,until:result.undoUntil});
+          const delay=Math.max(250,new Date(result.undoUntil).getTime()-Date.now()+350);
+          window.setTimeout(()=>{
+            setPendingUndo(prev=>prev?.id===result.id?null:prev);
+            void api('/api/sync',{method:'POST'}).catch(()=>undefined);
+          },delay);
+        }else{
+          setError(`Scheduled for ${new Date(result.scheduledAt||options.scheduledAt||'').toLocaleString()}.`);
+        }
+      }
       await Promise.all([loadList(),refreshStatus()]);
     } catch(e){setError(e instanceof Error?e.message:String(e));}
     finally{setBusy(false);}
+  };
+  const translateMessage=async(m:MessageDetail)=>{
+    const source=m.textBody||m.preview||'';
+    if(!source)return;
+    setBusy(true);
+    try{
+      const result=await api<{text:string;back_translation?:string;backTranslation?:string}>('/api/language',{method:'POST',body:JSON.stringify({
+        text:source,sourceLanguage:m.language||'auto',targetLanguage:'English',mode:'translate',tone:'professional',from:m.aliasAddress||undefined
+      })});
+      setTranslations(prev=>({...prev,[m.id]:{text:result.text,backTranslation:result.back_translation||result.backTranslation||''}}));
+    }catch(e){setError(e instanceof Error?e.message:String(e));}
+    finally{setBusy(false);}
+  };
+  const loadThreadAssist=async()=>{
+    if(!thread)return;
+    setBusy(true);setError(null);
+    try{setThreadAssistData(await api<any>(`/api/threads/${encodeURIComponent(thread.id)}/assist`,{method:'POST'}));}
+    catch(e){setError(e instanceof Error?e.message:String(e));}
+    finally{setBusy(false);}
+  };
+  const loadContactTimeline=async()=>{
+    if(!thread)return;
+    const last=[...thread.messages].reverse().find(m=>m.direction==='inbound')||thread.messages.at(-1);
+    const email=last?.direction==='inbound'?last.fromAddress:last?.toAddresses?.[0];
+    if(!email)return;
+    setBusy(true);setError(null);
+    try{setContactTimelineData(await api<any>('/api/contact-timeline',{method:'POST',body:JSON.stringify({email})}));}
+    catch(e){setError(e instanceof Error?e.message:String(e));}
+    finally{setBusy(false);}
+  };
+  const summarizeAttachment=async(id:string)=>{
+    setBusy(true);setError(null);
+    try{
+      const result=await api<{summary:string;key_points:string[];actions:string[];risks:string[];language:string}>(`/api/attachments/${encodeURIComponent(id)}/summary`,{method:'POST'});
+      setAttachmentSummaries(prev=>({...prev,[id]:result}));
+    }catch(e){setError(e instanceof Error?e.message:String(e));}
+    finally{setBusy(false);}
+  };
+  const snoozeCurrent=async(hours:number)=>{
+    const t=thread?.messages.at(-1);if(!t)return;
+    await api('/api/snooze',{method:'POST',body:JSON.stringify({threadId:t.threadId,untilAt:new Date(Date.now()+hours*3600000).toISOString()})});
+    setThread(null);await loadList();
+  };
+  const waitCurrent=async(days:number)=>{
+    const t=thread?.messages.at(-1);if(!t)return;
+    await api('/api/waiting',{method:'POST',body:JSON.stringify({threadId:t.threadId,messageId:t.id,dueAt:new Date(Date.now()+days*86400000).toISOString()})});
+    setThread(null);await loadList();
   };
 
   const unread=useMemo(()=>messages.filter(m=>!m.isRead).length,[messages]);
@@ -185,7 +259,8 @@ function App() {
           <MailIcon name="search" size={19}/>
           <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search mail" aria-label="Search mail"/>
         </div>
-        <button className="iconBtn" onClick={()=>setSettingsOpen(true)} title="Settings" aria-label="Settings"><MailIcon name="settings"/></button>
+        <button className="iconBtn" onClick={()=>setIntelligenceOpen(true)} title="GIBP Intelligence" aria-label="GIBP Intelligence"><MailIcon name="sparkles"/></button>
+                <button className="iconBtn" onClick={()=>setSettingsOpen(true)} title="Settings" aria-label="Settings"><MailIcon name="settings"/></button>
         <button className="iconBtn" onClick={runSync} disabled={busy} title="Sync now" aria-label="Sync now">
           <MailIcon name="sync" className={busy||status?.syncing?'spin':''}/>
         </button>
@@ -203,6 +278,7 @@ function App() {
           <button className="mobileIconButton" onClick={()=>setMobileSearchOpen(v=>!v)} aria-label="Search">
             <MailIcon name={mobileSearchOpen?'close':'search'} size={22}/>
           </button>
+          <button className="mobileIconButton" onClick={()=>setIntelligenceOpen(true)} aria-label="GIBP Intelligence"><MailIcon name="sparkles" size={21}/></button>
           <button className="mobileIconButton" onClick={()=>void runSync()} disabled={busy} aria-label="Sync now">
             <MailIcon name="sync" size={21} className={busy||status?.syncing?'spin':''}/>
           </button>
@@ -260,9 +336,16 @@ function App() {
                 <strong>{m.subject||'(no subject)'} {m.threadCount>1&&<i>{m.threadCount}</i>}</strong>
                 <p>{m.preview||'No preview'}</p>
                 <div className="rowMeta">
+                  {m.priority&&m.priority!=='normal'&&<span className={`intelBadge priority-${m.priority}`}><MailIcon name="priority" size={12}/>{m.priority}</span>}
+                  {m.aliasAddress&&<span className="intelBadge">{m.aliasAddress}</span>}
+                  {m.language&&m.language!=='unknown'&&<span className="intelBadge"><MailIcon name="language" size={12}/>{m.language}</span>}
+                  {m.needsMe&&<span className="intelBadge needsMe">Needs me</span>}
+                  {m.waiting&&<span className="intelBadge waiting">Waiting</span>}
                   {m.attachmentCount>0&&<span><MailIcon name="attach" size={14}/>{m.attachmentCount}</span>}
                   {m.status==='queued'&&<span className="queued">Queued</span>}
+                  {m.direction==='outbound'&&['delivered','delayed','bounced','complained','failed'].includes(m.status)&&<span className={`deliveryBadge ${m.status}`}>{m.status}</span>}
                 </div>
+                {m.whyItMatters&&<p className="whyItMatters">{m.whyItMatters}</p>}
               </div>
               <button
                 className={`starButton ${m.isStarred?'on':''}`}
@@ -281,10 +364,33 @@ function App() {
               <h2>{thread.subject||'(no subject)'}</h2>
             </div>
             <div className="threadActions">
+              <button title="Summarize thread & suggest replies" aria-label="Summarize thread" onClick={()=>void loadThreadAssist()}><MailIcon name="sparkles" size={20}/></button>
+              <button title="Contact timeline" aria-label="Contact timeline" onClick={()=>void loadContactTimeline()}><MailIcon name="mail" size={20}/></button>
+              <button title="Snooze 24 hours" aria-label="Snooze 24 hours" onClick={()=>void snoozeCurrent(24)}><MailIcon name="snooze" size={20}/></button>
+              <button title="Waiting for reply — remind in 3 days" aria-label="Waiting for reply" onClick={()=>void waitCurrent(3)}><MailIcon name="clock" size={20}/></button>
               <button title="Archive" aria-label="Archive" onClick={()=>void patch(thread.messages.at(-1)!.id,{isArchived:true})}><MailIcon name="archive" size={20}/></button>
               <button title="Trash" aria-label="Move to trash" onClick={()=>void patch(thread.messages.at(-1)!.id,{trash:true})}><MailIcon name="trash" size={20}/></button>
             </div>
           </div>
+          {threadAssistData&&<div className="threadAssistCard">
+            <div><b><MailIcon name="sparkles" size={16}/> Thread summary</b><span>{threadAssistData.status}</span></div>
+            <p>{threadAssistData.summary}</p>
+            {!!threadAssistData.suggested_replies?.length&&<div className="suggestedReplies">
+              {threadAssistData.suggested_replies.map((s,i)=><button key={i} onClick={()=>{
+                const target=[...thread.messages].reverse().find(m=>m.direction==='inbound')||thread.messages.at(-1);
+                if(target)reply(target,s.body);
+              }}><b>{s.label}</b><small>{s.tone}</small><span>{s.body}</span></button>)}
+            </div>}
+          </div>}
+          {contactTimelineData&&<div className="contactTimelineCard">
+            <div><b>{contactTimelineData.contact?.name||contactTimelineData.contact?.email||'Contact timeline'}</b>
+              {contactTimelineData.contact?.company&&<span>{contactTimelineData.contact.company}</span>}
+              {contactTimelineData.contact?.preferred_language&&<small>{contactTimelineData.contact.preferred_language}</small>}
+            </div>
+            <div className="contactTimelineRows">{(contactTimelineData.messages||[]).slice(0,12).map((x:any)=><button key={x.id} onClick={()=>void openThreadId(x.thread_id)}>
+              <b>{x.subject||'(no subject)'}</b><span>{x.preview||''}</span><time>{niceDate(x.created_at)}</time>
+            </button>)}</div>
+          </div>}
           <div className="threadMessages">{thread.messages.map(m=><article className="emailCard" key={m.id}>
             <div className="emailMeta">
               <div className="avatar">{initials(m.fromName||m.fromAddress)}</div>
@@ -295,12 +401,42 @@ function App() {
               </div>
               <time>{new Date(m.createdAt).toLocaleString([], {dateStyle:'medium',timeStyle:'short'})}</time>
             </div>
-            {m.htmlBody ? <iframe title={m.subject} sandbox="" srcDoc={m.htmlBody}/> : <div className="plainBody">{m.textBody||'(empty message)'}</div>}
-            {!!m.attachments.length&&<div className="attachments">{m.attachments.map(a=><button className="attachmentButton" key={a.id} onClick={()=>void openAttachment(a.id)}>
-              <span className="attachmentIcon"><MailIcon name="attach" size={19}/></span>
-              <div><b>{a.filename}</b><small>{a.sizeBytes?formatBytes(a.sizeBytes):a.contentType}</small></div>
-            </button>)}</div>}
-            <div className="emailActions"><button onClick={()=>reply(m)}><MailIcon name="reply" size={18}/>Reply</button></div>
+            {(m.whyItMatters||m.priority||m.aliasAddress||m.language)&&<div className="intelligenceStrip">
+              <span><MailIcon name="sparkles" size={15}/>{m.whyItMatters||m.intelligenceSummary||m.category||'Message intelligence'}</span>
+              <div>
+                {m.priority&&m.priority!=='normal'&&<b className={`priority-${m.priority}`}>{m.priority}</b>}
+                {m.aliasAddress&&<b>{m.aliasAddress}</b>}
+                {m.language&&m.language!=='unknown'&&<b>{m.language}</b>}
+              </div>
+            </div>}
+            {translations[m.id]
+              ? <div className="translatedBody"><div className="translationLabel"><MailIcon name="language" size={15}/>English translation</div>{translations[m.id].text}</div>
+              : (m.htmlBody ? <iframe title={m.subject} sandbox="" srcDoc={m.htmlBody}/> : <div className="plainBody">{m.textBody||'(empty message)'}</div>)}
+            {!!m.attachments.length&&<div className="attachments">{m.attachments.map(a=><div className="attachmentItem" key={a.id}>
+              <div className="attachmentActions">
+                <button className="attachmentButton" onClick={()=>void openAttachment(a.id)}>
+                  <span className="attachmentIcon"><MailIcon name="attach" size={19}/></span>
+                  <div><b>{a.filename}</b><small>{a.sizeBytes?formatBytes(a.sizeBytes):a.contentType}</small></div>
+                </button>
+                <button className="attachmentSummaryButton" disabled={busy} onClick={()=>void summarizeAttachment(a.id)}>
+                  <MailIcon name="sparkles" size={15}/>{attachmentSummaries[a.id]?'Refresh summary':'Summarize'}
+                </button>
+              </div>
+              {attachmentSummaries[a.id]&&<div className="attachmentSummary">
+                <b>AI attachment summary</b>
+                <p>{attachmentSummaries[a.id].summary}</p>
+                {!!attachmentSummaries[a.id].key_points?.length&&<ul>{attachmentSummaries[a.id].key_points.map((x,i)=><li key={i}>{x}</li>)}</ul>}
+                {!!attachmentSummaries[a.id].actions?.length&&<div><strong>Actions</strong><ul>{attachmentSummaries[a.id].actions.map((x,i)=><li key={i}>{x}</li>)}</ul></div>}
+                {!!attachmentSummaries[a.id].risks?.length&&<div><strong>Risks / caveats</strong><ul>{attachmentSummaries[a.id].risks.map((x,i)=><li key={i}>{x}</li>)}</ul></div>}
+              </div>}
+            </div>)}</div>}
+            <div className="emailActions">
+              <button onClick={()=>reply(m)}><MailIcon name="reply" size={18}/>Reply</button>
+              {m.direction==='inbound'&&m.language&&m.language!=='English'&&m.language!=='unknown'&&
+                <button onClick={()=>translations[m.id]?setTranslations(prev=>{const x={...prev};delete x[m.id];return x;}):void translateMessage(m)}>
+                  <MailIcon name="language" size={18}/>{translations[m.id]?'Show original':'Translate'}
+                </button>}
+            </div>
           </article>)}</div>
         </section>}
       </div>
@@ -343,7 +479,9 @@ function App() {
       </section>
     </div>}
 
-    {compose&&<Compose value={compose} identities={identities} busy={busy} onChange={setCompose} onClose={()=>setCompose(null)} onSend={()=>void send()}/>}
+    {pendingUndo&&<div className="undoSnackbar"><span>Message will send shortly.</span><button onClick={()=>void (async()=>{await api(`/api/scheduled/${pendingUndo.id}/cancel`,{method:'POST'});setPendingUndo(null);setError('Send cancelled.');await loadList();})()}>Undo</button></div>}
+    {intelligenceOpen&&<IntelligencePanel onClose={()=>setIntelligenceOpen(false)} onOpenThread={id=>void openThreadId(id)} onError={message=>setError(message)}/>}
+    {compose&&<Compose value={compose} identities={identities} busy={busy} onChange={setCompose} onClose={()=>setCompose(null)} onSend={options=>void send(options)}/>}
     {settingsOpen&&<SettingsPanel onClose={()=>setSettingsOpen(false)} onChanged={()=>void Promise.all([api<Identity[]>('/api/identities').then(setIdentities),refreshStatus(),loadList()])} onError={setError}/>}
   </div>
 }
@@ -363,25 +501,96 @@ function Empty({label}:{label:string}) {
   </div>;
 }
 
-function Compose({value,identities,busy,onChange,onClose,onSend}:{value:ComposeState;identities:Identity[];busy:boolean;onChange:(v:ComposeState)=>void;onClose:()=>void;onSend:()=>void}) {
+function Compose({value,identities,busy,onChange,onClose,onSend}:{value:ComposeState;identities:Identity[];busy:boolean;onChange:(v:ComposeState)=>void;onClose:()=>void;onSend:(options?:{scheduledAt?:string;undoSeconds?:number})=>void}) {
+  const languages=['English','Nepali','Hindi','French','German','Spanish','Arabic','Chinese','Japanese','Portuguese','Italian','Dutch','Bengali','Urdu','Korean'];
+  const [targetLanguage,setTargetLanguage]=useState(value.language||'English');
+  const [tone,setTone]=useState('professional');
+  const [backTranslation,setBackTranslation]=useState('');
+  const [aiBusy,setAiBusy]=useState(false);
+  const [scheduleOpen,setScheduleOpen]=useState(false);
+  const [scheduledAt,setScheduledAt]=useState('');
+  const [undoSeconds,setUndoSeconds]=useState(10);
+  const [context,setContext]=useState<any>(null);
+
+  useEffect(()=>{
+    if(!value.from)return;
+    const t=window.setTimeout(()=>{
+      void api<any>('/api/compose/context',{method:'POST',body:JSON.stringify({from:value.from})}).then(setContext).catch(()=>setContext(null));
+    },250);
+    return()=>window.clearTimeout(t);
+  },[value.from]);
+
+  const transform=async(mode:'translate'|'improve'|'bilingual'|'compose')=>{
+    if(!value.text.trim())return;
+    setAiBusy(true);
+    try{
+      const result=await api<{text:string;back_translation?:string;backTranslation?:string}>('/api/language',{method:'POST',body:JSON.stringify({
+        text:value.text,sourceLanguage:'auto',targetLanguage,mode,tone,from:value.from
+      })});
+      onChange({...value,text:result.text,language:targetLanguage});
+      setBackTranslation(result.back_translation||result.backTranslation||'');
+    }finally{setAiBusy(false);}
+  };
+  const applyTemplate=(template:any)=>{
+    onChange({...value,subject:template.subject||value.subject,text:template.text_body||value.text,language:template.language||value.language});
+  };
+  const dictate=()=>{
+    const Ctor=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition;
+    if(!Ctor)return;
+    const recognition=new Ctor();
+    recognition.lang='en-GB';
+    recognition.interimResults=false;
+    recognition.maxAlternatives=1;
+    recognition.onresult=(event:any)=>{
+      const text=event.results?.[0]?.[0]?.transcript||'';
+      if(text)onChange({...value,text:`${value.text}${value.text?' ':''}${text}`});
+    };
+    recognition.start();
+  };
+  const speechAvailable=Boolean((window as any).SpeechRecognition||(window as any).webkitSpeechRecognition);
+
   return <div className="composeBackdrop">
     <section className="compose">
       <div className="composeHead">
         <button className="composeClose" onClick={onClose} aria-label="Close compose"><MailIcon name="close"/></button>
         <b>{value.replyToMessageId?'Reply':'New message'}</b>
-        <button className="composeSendTop" disabled={busy||!csv(value.to).length||!value.from} onClick={onSend}>
+        <button className="composeSendTop" disabled={busy||!csv(value.to).length||!value.from} onClick={()=>onSend({undoSeconds})}>
           {busy?'Sending…':'Send'}<MailIcon name="send" size={18}/>
         </button>
       </div>
+      {context?.alias&&<div className="personaBar"><MailIcon name="sparkles" size={15}/><span>{context.alias.address}</span>{context.alias.persona&&<b>{context.alias.persona}</b>}{context.alias.tone&&<em>{context.alias.tone}</em>}{context.signature&&<small>Signature: {context.signature.name}</small>}</div>}
       <div className="field"><label>From</label><input list="gibp-from-identities" value={value.from} onChange={e=>onChange({...value,from:e.target.value.trim()})} placeholder="name@verified-domain"/><datalist id="gibp-from-identities">{identities.map(i=><option key={i.address} value={i.address}>{i.formatted}</option>)}</datalist></div>
       <div className="field"><label>To</label><input autoFocus value={value.to} onChange={e=>onChange({...value,to:e.target.value})} placeholder="name@example.com"/></div>
       <details><summary>Cc / Bcc</summary><div className="field"><label>Cc</label><input value={value.cc} onChange={e=>onChange({...value,cc:e.target.value})}/></div><div className="field"><label>Bcc</label><input value={value.bcc} onChange={e=>onChange({...value,bcc:e.target.value})}/></div></details>
       <input className="subject" value={value.subject} onChange={e=>onChange({...value,subject:e.target.value})} placeholder="Subject"/>
-      <textarea value={value.text} onChange={e=>onChange({...value,text:e.target.value})} placeholder="Write your message…"/>
+      <div className="composeAiBar">
+        <select value={targetLanguage} onChange={e=>setTargetLanguage(e.target.value)} aria-label="Target language">
+          {languages.map(l=><option key={l}>{l}</option>)}
+        </select>
+        <select value={tone} onChange={e=>setTone(e.target.value)} aria-label="Tone">
+          <option value="professional">Professional</option><option value="formal">Formal</option><option value="friendly">Friendly</option>
+          <option value="banking">Banking</option><option value="partnership">Partnership</option><option value="support">Support</option><option value="sales">Sales</option>
+        </select>
+        <button disabled={aiBusy||!value.text.trim()} onClick={()=>void transform('compose')}><MailIcon name="sparkles" size={16}/>Write in…</button>
+        <button disabled={aiBusy||!value.text.trim()} onClick={()=>void transform('translate')}><MailIcon name="language" size={16}/>Translate</button>
+        <button disabled={aiBusy||!value.text.trim()} onClick={()=>void transform('improve')}><MailIcon name="sparkles" size={16}/>Improve</button>
+        <button disabled={aiBusy||!value.text.trim()} onClick={()=>void transform('bilingual')}>Bilingual</button>
+        {speechAvailable&&<button onClick={dictate}><MailIcon name="mic" size={16}/>Dictate</button>}
+      </div>
+      {!!context?.templates?.length&&<div className="templateBar"><span>Templates</span>{context.templates.slice(0,5).map((t:any)=><button key={t.id} onClick={()=>applyTemplate(t)}>{t.name}</button>)}</div>}
+      <textarea value={value.text} onChange={e=>{onChange({...value,text:e.target.value});setBackTranslation('');}} placeholder="Write your message…"/>
+      {backTranslation&&<div className="backTranslation"><b>English back-translation</b><span>{backTranslation}</span></div>}
       {!!value.attachments.length&&<div className="composeFiles">{value.attachments.map((f,i)=><span key={i}>{f.name}<button onClick={()=>onChange({...value,attachments:value.attachments.filter((_,x)=>x!==i)})} aria-label={`Remove ${f.name}`}><MailIcon name="close" size={15}/></button></span>)}</div>}
+      {scheduleOpen&&<div className="scheduleBar">
+        <label>Send at <input type="datetime-local" value={scheduledAt} onChange={e=>setScheduledAt(e.target.value)}/></label>
+        <label>Undo <select value={undoSeconds} onChange={e=>setUndoSeconds(Number(e.target.value))}><option value={0}>Off</option><option value={5}>5 sec</option><option value={10}>10 sec</option><option value={15}>15 sec</option></select></label>
+        <button disabled={!scheduledAt||busy} onClick={()=>onSend({scheduledAt:new Date(scheduledAt).toISOString(),undoSeconds:0})}>Schedule</button>
+      </div>}
       <div className="composeFoot">
-        <button className="sendBtn" disabled={busy||!csv(value.to).length||!value.from} onClick={onSend}>{busy?'Sending…':'Send'}<MailIcon name="send" size={17}/></button>
+        <button className="sendBtn" disabled={busy||!csv(value.to).length||!value.from} onClick={()=>onSend({undoSeconds})}>{busy?'Sending…':'Send'}<MailIcon name="send" size={17}/></button>
         <label className="attachBtn" aria-label="Attach files"><MailIcon name="attach" size={21}/><input type="file" multiple onChange={e=>onChange({...value,attachments:[...value.attachments,...Array.from(e.target.files||[])]})}/></label>
+        <button className="attachBtn" onClick={()=>setScheduleOpen(v=>!v)} aria-label="Send later"><MailIcon name="clock" size={21}/></button>
+        <span className="undoSetting">Undo: {undoSeconds?`${undoSeconds}s`:'off'}</span>
         <span className="saved"><MailIcon name="check" size={15}/>Saved locally</span>
       </div>
     </section>

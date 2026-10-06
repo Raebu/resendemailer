@@ -289,8 +289,10 @@ export async function sendQueuedMessage(id: string): Promise<{ id: string; statu
   const account = await one<MobileAccount>('SELECT * FROM accounts WHERE id=? AND enabled=1', [row.account_id]);
   if (!account) throw new Error('Resend account unavailable');
   const attachments = await all<any>('SELECT * FROM attachments WHERE message_id=?', [id]);
+  const alias=await one<{display_name:string|null}>('SELECT display_name FROM aliases WHERE lower(address)=lower(?) AND enabled=1 LIMIT 1',[row.from_address]);
+  const displayName=String(alias?.display_name||'').replace(/[\r\n"]/g,' ').trim();
   const payload: any = {
-    from: row.from_address,
+    from: displayName?`${displayName} <${row.from_address}>`:row.from_address,
     to: json(row.to_json, []), cc: json(row.cc_json, []), bcc: json(row.bcc_json, []),
     subject: row.subject, text: row.text_body || undefined, html: row.html_body || undefined,
   };

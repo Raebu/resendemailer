@@ -1,4 +1,4 @@
-export type Folder = 'inbox' | 'sent' | 'drafts' | 'outbox' | 'archive' | 'trash' | 'starred';
+export type Folder = 'inbox' | 'needs_me' | 'waiting' | 'snoozed' | 'sent' | 'drafts' | 'outbox' | 'archive' | 'trash' | 'starred';
 
 export interface Identity {
   name: string;
@@ -27,6 +27,17 @@ export interface MessageSummary {
   deletedAt: string | null;
   attachmentCount: number;
   threadCount: number;
+  category?: string | null;
+  priority?: 'urgent' | 'high' | 'normal' | 'low' | null;
+  needsReply?: boolean;
+  needsMe?: boolean;
+  waiting?: boolean;
+  language?: string | null;
+  whyItMatters?: string | null;
+  intelligenceSummary?: string | null;
+  labels?: string[];
+  aliasAddress?: string | null;
+  snoozedUntil?: string | null;
 }
 
 export interface Attachment {

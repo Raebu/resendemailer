@@ -329,3 +329,123 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   .listPane.withThread{width:43%;min-width:330px}
   .threadMessages{padding-left:18px;padding-right:18px}
 }
+
+
+/* Intelligence, multilingual and scheduling layer */
+.intelBadge{display:inline-flex!important;align-items:center;gap:3px;border:1px solid #2d3745;background:#151c25;color:#93a0b1;border-radius:999px;padding:2px 7px;font-size:9px!important;text-transform:none}
+.intelBadge.priority-urgent,.priority-urgent{color:#ff9a9c!important;border-color:#593136!important;background:#29171a!important}
+.intelBadge.priority-high,.priority-high{color:#f2c975!important;border-color:#5a4928!important;background:#282112!important}
+.intelBadge.needsMe{color:#8fc7ff;border-color:#2b4a66;background:#12202d}
+.intelBadge.waiting{color:#b8a7ff;border-color:#473c68;background:#1b1728}
+.whyItMatters{margin-top:7px!important;color:#a8b4c5!important;font-size:11px!important;font-style:italic}
+.intelligenceStrip{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:10px 18px;background:#111923;border-bottom:1px solid #202936;color:#aeb9c8;font-size:11px;line-height:1.45}
+.intelligenceStrip>span{display:flex;align-items:flex-start;gap:7px;min-width:0}
+.intelligenceStrip>span svg{color:#d8b85d;flex:0 0 auto;margin-top:1px}
+.intelligenceStrip>div{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+.intelligenceStrip b{font-size:9px;font-weight:700;border:1px solid #303a48;background:#171e27;border-radius:999px;padding:3px 6px;color:#8f9bad;white-space:nowrap}
+.translatedBody{padding:26px 20px 30px;color:#dce3ec;font-size:15px;line-height:1.72;white-space:pre-wrap;background:#0f151d}
+.translationLabel{display:flex;align-items:center;gap:6px;color:#d7b75e;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+.emailActions{display:flex;flex-wrap:wrap;gap:8px}
+.personaBar{min-height:34px;display:flex;align-items:center;gap:7px;padding:6px 15px;background:#151c25;border-bottom:1px solid #252e3a;color:#aeb8c7;font-size:10px;overflow:auto}
+.personaBar svg{color:#ddb95e;flex:0 0 auto}.personaBar span,.personaBar b,.personaBar em,.personaBar small{white-space:nowrap}
+.personaBar b{color:#ead18a}.personaBar em{font-style:normal;color:#8ea0b5}.personaBar small{margin-left:auto;color:#6f7c8f}
+.composeAiBar{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid #202833;background:#0f151c;overflow-x:auto}
+.composeAiBar select,.composeAiBar button,.templateBar button,.scheduleBar button,.scheduleBar input,.scheduleBar select{height:34px;border:1px solid #303a48;background:#171e27;color:#cdd5df;border-radius:9px;padding:0 9px;font-size:10px;white-space:nowrap}
+.composeAiBar button,.templateBar button,.scheduleBar button{cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.composeAiBar button:hover,.templateBar button:hover,.scheduleBar button:hover{background:#1d2631}.composeAiBar button:disabled{opacity:.45}
+.templateBar{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid #202833;overflow-x:auto;background:#10161e}
+.templateBar>span{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:#687588;margin-right:2px}
+.backTranslation{max-height:130px;overflow:auto;padding:10px 14px;background:#161e27;border-top:1px solid #283241;color:#aeb9c7;font-size:11px;line-height:1.5}
+.backTranslation b,.backTranslation span{display:block}.backTranslation b{color:#d8b85e;font-size:9px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
+.scheduleBar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 12px;background:#171e27;border-top:1px solid #283241;color:#8f9bad;font-size:10px}
+.scheduleBar label{display:flex;align-items:center;gap:6px}.scheduleBar input{color-scheme:dark}.scheduleBar button{background:#cfad55;color:#171307;border-color:#cfad55;font-weight:800}
+.undoSetting{color:#7d8999;font-size:10px;white-space:nowrap}
+.intelligenceSettingsGrid{display:grid;gap:10px}.miniForm{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.miniForm .wide{grid-column:1/-1}
+.ruleSummary{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9px;color:#8390a2;white-space:pre-wrap;word-break:break-word}
+
+@media(max-width:820px){
+  .whyItMatters{font-size:12px!important;margin-top:6px!important}
+  .intelBadge{font-size:10px!important;padding:3px 7px}
+  .intelligenceStrip{padding:10px 14px;display:block}
+  .intelligenceStrip>div{justify-content:flex-start;margin-top:8px}
+  .translatedBody{padding:24px 17px 30px;font-size:16px}
+  .personaBar{padding:7px 13px;font-size:11px}
+  .personaBar small{display:none}
+  .composeAiBar{padding:8px 9px;scrollbar-width:none}
+  .composeAiBar::-webkit-scrollbar,.templateBar::-webkit-scrollbar{display:none}
+  .composeAiBar select,.composeAiBar button,.templateBar button{height:38px;font-size:11px;border-radius:11px}
+  .templateBar{padding:8px 9px}
+  .backTranslation{max-height:150px;font-size:12px}
+  .scheduleBar{padding:10px 12px}
+  .scheduleBar label{width:100%;justify-content:space-between;font-size:12px}
+  .scheduleBar input,.scheduleBar select,.scheduleBar button{height:40px;font-size:12px}
+  .scheduleBar input{flex:1}
+  .undoSetting{font-size:10px}
+  .miniForm{grid-template-columns:1fr}
+  .miniForm .wide{grid-column:auto}
+}
+
+
+.assistantBackdrop{position:fixed;z-index:55;inset:0;background:rgba(0,0,0,.68);backdrop-filter:blur(8px);display:grid;place-items:center;padding:18px}
+.assistantPanel{width:min(820px,100%);max-height:calc(100dvh - 36px);overflow:auto;background:#0e141b;border:1px solid #2a3442;border-radius:20px;box-shadow:var(--shadow)}
+.assistantPanel>header{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;padding:16px 18px;background:rgba(15,21,29,.96);border-bottom:1px solid #252e3a;backdrop-filter:blur(18px)}
+.assistantPanel>header>div{display:flex;align-items:center;gap:11px}.assistantPanel h2,.assistantPanel h3{margin:0}.assistantPanel h2{font-size:18px}.assistantPanel>header p{font-size:10px;color:#758195;margin:3px 0 0}
+.assistantPanel>header>button,.assistantSectionTitle button{width:40px;height:40px;border:0;border-radius:50%;background:#1a222d;color:#aab4c1;display:grid;place-items:center;cursor:pointer}
+.assistantMark{width:38px;height:38px;border-radius:12px;background:#2a2212;color:#dfbd65;display:grid;place-items:center}
+.assistantSearch{display:flex;align-items:center;gap:9px;padding:14px 16px;border-bottom:1px solid #222b37;color:#788598}
+.assistantSearch input{flex:1;height:44px;border:1px solid #2b3544;background:#111821;color:#e8edf3;border-radius:13px;padding:0 12px;font-size:13px;outline:none}
+.assistantSearch button{height:40px;border:0;border-radius:11px;background:#cfad55;color:#171307;padding:0 14px;font-weight:800;font-size:11px;cursor:pointer}
+.assistantSection{padding:15px 16px;border-bottom:1px solid #202833}.assistantSection h3{font-size:13px;color:#dbe2eb}.assistantSectionTitle{display:flex;align-items:center;justify-content:space-between}
+.briefingSummary{font-size:12px;color:#a5b0bf;line-height:1.6;margin:9px 0 12px}
+.assistantResults{display:grid;gap:7px;margin-top:10px}.assistantResults>button,.reminderRow{width:100%;border:1px solid #26303d;background:#121923;color:#dce3eb;border-radius:13px;padding:11px 12px;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;cursor:pointer}
+.assistantResults>button:hover{background:#17202a}.assistantResults b,.assistantResults small,.reminderRow b,.reminderRow small{display:block}.assistantResults b,.reminderRow b{font-size:12px}.assistantResults small,.reminderRow small{font-size:10px;color:#778496;margin-top:3px}
+.resultArrow{transform:rotate(180deg);color:#718096}.briefingUrgency{font-style:normal;font-size:9px;border-radius:999px;padding:4px 7px;background:#202936;color:#93a0b1;text-transform:uppercase}.briefingUrgency.urgent{background:#2d1719;color:#ff9da0}.briefingUrgency.high{background:#2a2212;color:#efc66f}
+.assistantEmpty{padding:22px;text-align:center;color:#6d798a;font-size:11px}.reminderRow{justify-content:flex-start}.reminderRow>svg{color:#d5b45b;flex:0 0 auto}
+
+@media(max-width:820px){
+  .assistantBackdrop{padding:0;background:#0b0f14;backdrop-filter:none}
+  .assistantPanel{width:100%;height:100dvh;max-height:none;border:0;border-radius:0;background:#0b0f14}
+  .assistantPanel>header{min-height:calc(64px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 14px 0 15px}
+  .assistantPanel h2{font-size:20px}.assistantPanel>header p{font-size:11px}
+  .assistantSearch{padding:12px 12px}.assistantSearch input{height:46px;font-size:14px}.assistantSearch button{height:42px}
+  .assistantSection{padding:15px 12px}.assistantSection h3{font-size:14px}.briefingSummary{font-size:13px}
+  .assistantResults b,.reminderRow b{font-size:13px}.assistantResults small,.reminderRow small{font-size:11px}
+}
+
+
+.undoSnackbar{position:fixed;z-index:80;left:50%;bottom:calc(88px + env(safe-area-inset-bottom));transform:translateX(-50%);min-width:280px;max-width:calc(100vw - 28px);height:52px;background:#eef2f7;color:#161b22;border-radius:14px;box-shadow:0 14px 50px rgba(0,0,0,.42);display:flex;align-items:center;justify-content:space-between;gap:18px;padding:0 10px 0 16px;font-size:13px;font-weight:600}
+.undoSnackbar button{border:0;background:transparent;color:#8a6818;font-weight:900;min-width:66px;height:40px;border-radius:10px;cursor:pointer}
+.undoSnackbar button:hover{background:#e4e8ee}
+.deliveryBadge{display:inline-flex!important;align-items:center;gap:4px;border-radius:999px;padding:2px 7px;font-size:9px!important;text-transform:capitalize}
+.deliveryBadge.delivered{color:#79d9a9;background:#153326}
+.deliveryBadge.delayed{color:#e9c36f;background:#352c18}
+.deliveryBadge.bounced,.deliveryBadge.complained,.deliveryBadge.failed{color:#f08f92;background:#35191c}
+@media(max-width:820px){.undoSnackbar{left:14px;right:14px;bottom:calc(84px + env(safe-area-inset-bottom));transform:none;max-width:none}.deliveryBadge{font-size:10px!important}}
+
+
+/* Attachment intelligence */
+.attachmentItem{display:flex;flex-direction:column;gap:8px;max-width:100%}
+.attachmentActions{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap}
+.attachmentSummaryButton{display:inline-flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font:inherit;cursor:pointer}
+.attachmentSummaryButton:disabled{opacity:.55;cursor:default}
+.attachmentSummary{padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);font-size:.92rem;line-height:1.45}
+.attachmentSummary p{margin:6px 0 8px}
+.attachmentSummary ul{margin:4px 0 8px;padding-left:20px}
+.aliasColorField{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.aliasColorField input[type="color"]{width:42px;height:32px;padding:2px;border:1px solid var(--line);border-radius:8px;background:transparent}
+
+
+/* Thread and contact intelligence */
+.threadAssistCard,.contactTimelineCard{margin:12px 16px 0;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2);display:flex;flex-direction:column;gap:10px}
+.threadAssistCard>div:first-child,.contactTimelineCard>div:first-child{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.threadAssistCard>div:first-child b{display:inline-flex;align-items:center;gap:6px}
+.threadAssistCard>div:first-child span,.contactTimelineCard>div:first-child span,.contactTimelineCard>div:first-child small{opacity:.7}
+.threadAssistCard p{margin:0;line-height:1.5}
+.suggestedReplies{display:grid;gap:8px}
+.suggestedReplies button{display:grid;grid-template-columns:1fr auto;gap:3px 10px;text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:var(--surface);cursor:pointer}
+.suggestedReplies button span{grid-column:1/-1;white-space:pre-wrap;line-height:1.4}
+.suggestedReplies button small{opacity:.65}
+.contactTimelineRows{display:grid;gap:6px}
+.contactTimelineRows button{display:grid;grid-template-columns:1fr auto;gap:2px 10px;text-align:left;padding:9px 10px;border:0;border-radius:9px;background:var(--surface);cursor:pointer}
+.contactTimelineRows button span{grid-column:1/-1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.72}
+.contactTimelineRows time{font-size:.78rem;opacity:.65}

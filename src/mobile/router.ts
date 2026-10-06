@@ -5,6 +5,8 @@ import { accountForSender, flushMobileOutbox, refreshDomains, queueAndSend, sync
 import { configureAi, createDefaultRule, evaluateInbound, reconcileCampaignReplies, runCampaignTick } from './automation.js';
 import { pushAllReplicas, pushReplicaTarget } from './replica.js';
 import { configureBackgroundAccount, removeBackgroundAccount, configureBackgroundAutomation, setBackgroundAutomationMode, setBackgroundSuppressions, setBackgroundForegroundAudit, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
+import { analyzeInbound, attentionBriefing, composeContext, contactTimeline, createReminder, languageTransform, markWaiting, smartSearch, snoozeThread, summarizeAttachment, threadAssist } from './intelligence.js';
+import { cancelScheduled, configureEventRelay, flushScheduledSends, listScheduled, recordDeliveryEvent, scheduleSend, syncEventRelay } from './scheduler.js';
 
 let syncing=false;
 const parseBody=(init:RequestInit):any=>{
@@ -17,6 +19,10 @@ const toSummary=(r:any)=>({
   subject:r.subject,preview:r.preview,createdAt:r.created_at,receivedAt:r.received_at,sentAt:r.sent_at,
   isRead:Boolean(r.is_read),isStarred:Boolean(r.is_starred),isArchived:Boolean(r.is_archived),deletedAt:r.deleted_at,
   attachmentCount:Number(r.attachment_count||0),threadCount:Number(r.thread_count||1),
+  category:r.category||null,priority:r.priority||null,needsReply:Boolean(r.needs_reply),needsMe:Boolean(r.needs_me),
+  waiting:Boolean(r.waiting),language:r.language||null,whyItMatters:r.why_it_matters||null,
+  intelligenceSummary:r.intelligence_summary||null,labels:json(r.labels_json,[]),aliasAddress:r.alias_address||null,
+  snoozedUntil:r.snoozed_until||null,
 });
 const detail=async(r:any)=>({
   ...toSummary(r),bccAddresses:json(r.bcc_json,[]),replyToAddresses:json(r.reply_to_json,[]),
@@ -38,13 +44,23 @@ async function listMessages(url:URL):Promise<any[]>{
   else if(folder==='archive')where+=' AND m.is_archived=1';
   else if(folder==='trash')where='m.deleted_at IS NOT NULL';
   else if(folder==='starred')where+=' AND m.is_starred=1';
+  else if(folder==='needs_me')where+=' AND coalesce(mi.needs_me,0)=1';
+  else if(folder==='waiting')where+=" AND (coalesce(mi.waiting,0)=1 OR EXISTS(SELECT 1 FROM reminders rr WHERE rr.thread_id=m.thread_id AND rr.state='pending' AND rr.kind='waiting_reply'))";
+  else if(folder==='snoozed')where+=" AND sz.until_at>datetime('now')";
   const params:any[]=[];
   if(q){where+=" AND (lower(m.subject) LIKE ? OR lower(m.from_address) LIKE ? OR lower(coalesce(m.text_body,'')) LIKE ?)";params.push(`%${q}%`,`%${q}%`,`%${q}%`);}
   const rows=await all<any>(`
-    SELECT m.*,
+    SELECT m.*,mi.category,mi.priority,mi.needs_reply,mi.needs_me,mi.waiting,mi.language,mi.why_it_matters,
+      mi.summary intelligence_summary,mi.labels_json,al.address alias_address,sz.until_at snoozed_until,
       (SELECT count(*) FROM attachments a WHERE a.message_id=m.id) attachment_count,
       (SELECT count(*) FROM messages x WHERE x.thread_id=m.thread_id AND x.deleted_at IS NULL) thread_count
-    FROM messages m WHERE ${where} ORDER BY m.created_at DESC LIMIT 200
+    FROM messages m
+    LEFT JOIN message_intelligence mi ON mi.message_id=m.id
+    LEFT JOIN aliases al ON al.id=mi.alias_id
+    LEFT JOIN snoozes sz ON sz.thread_id=m.thread_id
+    WHERE ${where} ORDER BY
+      CASE coalesce(mi.priority,'normal') WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+      m.created_at DESC LIMIT 200
   `,params);
   const seen=new Set<string>();
   return rows.filter(r=>folder==='outbox'||(!seen.has(r.thread_id)&&!!seen.add(r.thread_id))).map(toSummary);
@@ -207,6 +223,17 @@ async function addCampaignContacts(campaignId:string,body:any):Promise<any>{
   return{added};
 }
 
+async function decorateOutgoing(body:any):Promise<any>{
+  const from=String(body.from||'').trim();
+  if(!from)return body;
+  const ctx=await composeContext(from);
+  if(body.applySignature===false||!ctx.signature?.text_body)return body;
+  const signature=String(ctx.signature.text_body||'').trim();
+  const text=String(body.text||'');
+  if(!signature||text.includes(signature))return body;
+  return{...body,text:`${text.trimEnd()}\n\n${signature}`};
+}
+
 export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Promise<T>{
   await createDefaultRule();
   const url=new URL(rawUrl,'https://local.gibp.invalid');
@@ -233,9 +260,14 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     try{
       const result=await syncAllAccounts();
       await importBackgroundAutomationState();
-      for(const id of result.newInboundIds)await evaluateInbound(id);
+      for(const id of result.newInboundIds){
+        const intelligence=await analyzeInbound(id);
+        await evaluateInbound(id,(intelligence as any)?.automation_mode||null);
+      }
       await reconcileCampaignReplies();
       await syncSuppressionsToBackground();
+      try{await syncEventRelay();}catch{/* delivery relay is optional and must not block mailbox sync */}
+      await flushScheduledSends();
       await flushMobileOutbox();
       await runCampaignTick();
       await syncSuppressionsToBackground();
@@ -251,9 +283,15 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     const thread=await one<any>('SELECT * FROM threads WHERE id=?',[id]);
     if(!thread)throw new Error('Thread not found');
     const rows=await all<any>(`
-      SELECT m.*,(SELECT count(*) FROM attachments a WHERE a.message_id=m.id) attachment_count,
+      SELECT m.*,mi.category,mi.priority,mi.needs_reply,mi.needs_me,mi.waiting,mi.language,mi.why_it_matters,
+      mi.summary intelligence_summary,mi.labels_json,al.address alias_address,sz.until_at snoozed_until,
+      (SELECT count(*) FROM attachments a WHERE a.message_id=m.id) attachment_count,
       (SELECT count(*) FROM messages x WHERE x.thread_id=m.thread_id AND x.deleted_at IS NULL) thread_count
-      FROM messages m WHERE m.thread_id=? AND m.deleted_at IS NULL ORDER BY m.created_at`,[id]);
+      FROM messages m
+      LEFT JOIN message_intelligence mi ON mi.message_id=m.id
+      LEFT JOIN aliases al ON al.id=mi.alias_id
+      LEFT JOIN snoozes sz ON sz.thread_id=m.thread_id
+      WHERE m.thread_id=? AND m.deleted_at IS NULL ORDER BY m.created_at`,[id]);
     for(const row of rows.filter(x=>!x.is_read)){
       await run('UPDATE messages SET is_read=1,revision=? WHERE id=?',[await nextRevision(),row.id]);
     }
@@ -285,7 +323,83 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     return{id} as T;
   }
   if(path.startsWith('/api/drafts/')&&method==='DELETE'){await run('DELETE FROM drafts WHERE id=?',[decodeURIComponent(path.split('/').pop()!)]);return{ok:true} as T;}
-  if(path==='/api/send'&&method==='POST')return await queueAndSend(body) as T;
+  if(path==='/api/send'&&method==='POST'){
+    const payload=await decorateOutgoing(body);
+    const undo=Math.max(0,Math.min(30,Number(body.undoSeconds||0)));
+    const scheduledAt=body.scheduledAt?String(body.scheduledAt):null;
+    if(undo>0||scheduledAt)return await scheduleSend(payload,scheduledAt||new Date().toISOString(),undo) as T;
+    return await queueAndSend(payload) as T;
+  }
+  if(path==='/api/compose/context'&&method==='POST')return await composeContext(String(body.from||'')) as T;
+  if(path==='/api/scheduled'&&method==='GET')return await listScheduled() as T;
+  if(path==='/api/scheduled'&&method==='POST')return await scheduleSend(body.payload||body,String(body.scheduledAt),Number(body.undoSeconds||0)) as T;
+  const undoMatch=path.match(/^\/api\/scheduled\/([^/]+)\/cancel$/);
+  if(undoMatch&&method==='POST')return await cancelScheduled(decodeURIComponent(undoMatch[1])) as T;
+  if(path==='/api/delivery-events'&&method==='GET')return await all<any>('SELECT * FROM delivery_events ORDER BY occurred_at DESC LIMIT 300') as T;
+  if(path==='/api/event-relay/config'&&method==='POST'){await configureEventRelay(String(body.url||''),String(body.token||''));return{ok:true} as T;}
+  if(path==='/api/event-relay/sync'&&method==='POST')return await syncEventRelay() as T;
+  if(path==='/api/delivery-events'&&method==='POST')return await recordDeliveryEvent(body) as T;
+  const threadAssistMatch=path.match(/^\/api\/threads\/([^/]+)\/assist$/);
+  if(threadAssistMatch&&method==='POST')return await threadAssist(decodeURIComponent(threadAssistMatch[1])) as T;
+  if(path==='/api/contact-timeline'&&method==='POST')return await contactTimeline(String(body.email||'')) as T;
+  if(path==='/api/intelligence/briefing'&&method==='GET')return await attentionBriefing() as T;
+  if(path==='/api/intelligence/search'&&method==='POST')return await smartSearch(String(body.query||'')) as T;
+  const attachmentSummaryMatch=path.match(/^\/api\/attachments\/([^/]+)\/summary$/);
+  if(attachmentSummaryMatch&&method==='POST')return await summarizeAttachment(decodeURIComponent(attachmentSummaryMatch[1])) as T;
+  if(path==='/api/language'&&method==='POST')return await languageTransform({
+    text:String(body.text||''),sourceLanguage:body.sourceLanguage?String(body.sourceLanguage):undefined,
+    targetLanguage:String(body.targetLanguage||'English'),mode:body.mode?String(body.mode):undefined,tone:body.tone?String(body.tone):undefined,
+    from:body.from?String(body.from):undefined,
+  }) as T;
+  if(path==='/api/reminders'&&method==='GET')return await all<any>("SELECT * FROM reminders WHERE state='pending' ORDER BY due_at") as T;
+  if(path==='/api/reminders'&&method==='POST')return {id:await createReminder(String(body.threadId),body.messageId?String(body.messageId):null,String(body.kind||'follow_up'),String(body.dueAt),String(body.note||''))} as T;
+  if(path.startsWith('/api/reminders/')&&method==='PATCH'){
+    const id=decodeURIComponent(path.split('/').pop()!);
+    await run('UPDATE reminders SET state=?,updated_at=? WHERE id=?',[String(body.state||'done'),isoNow(),id]);
+    return{ok:true} as T;
+  }
+  if(path==='/api/snooze'&&method==='POST'){await snoozeThread(String(body.threadId),String(body.untilAt));return{ok:true} as T;}
+  if(path==='/api/waiting'&&method==='POST'){await markWaiting(String(body.threadId),body.messageId?String(body.messageId):null,body.dueAt?String(body.dueAt):undefined);return{ok:true} as T;}
+
+  if(path==='/api/aliases'&&method==='GET')return await all<any>('SELECT * FROM aliases WHERE enabled=1 ORDER BY address') as T;
+  if(path==='/api/aliases'&&method==='POST'){
+    const now=isoNow(),id=body.id||uid('alias_');
+    await run(`INSERT INTO aliases(id,account_id,address,pattern,display_name,signature_id,persona,tone,default_language,folder,color,notification_priority,ai_mode,glossary_json,forward_to_json,is_dynamic,enabled,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(address) DO UPDATE SET pattern=excluded.pattern,display_name=excluded.display_name,signature_id=excluded.signature_id,persona=excluded.persona,tone=excluded.tone,default_language=excluded.default_language,folder=excluded.folder,color=excluded.color,notification_priority=excluded.notification_priority,ai_mode=excluded.ai_mode,glossary_json=excluded.glossary_json,forward_to_json=excluded.forward_to_json,updated_at=excluded.updated_at`,
+      [id,String(body.accountId),String(body.address).toLowerCase(),body.pattern||null,body.displayName||null,body.signatureId||null,body.persona||null,body.tone||null,body.defaultLanguage||'auto',body.folder||null,body.color||null,body.notificationPriority||'normal',body.aiMode||'inherit',JSON.stringify(body.glossary||[]),JSON.stringify(body.forwardTo||[]),body.isDynamic?1:0,1,now,now]);
+    return{id} as T;
+  }
+
+  if(path==='/api/routing-rules'&&method==='GET')return await all<any>('SELECT * FROM routing_rules ORDER BY priority,created_at') as T;
+  if(path==='/api/routing-rules'&&method==='POST'){
+    const id=body.id||uid('route_'),now=isoNow();
+    await run(`INSERT INTO routing_rules(id,name,enabled,priority,conditions_json,actions_json,stop_processing,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name,enabled=excluded.enabled,priority=excluded.priority,conditions_json=excluded.conditions_json,actions_json=excluded.actions_json,stop_processing=excluded.stop_processing,updated_at=excluded.updated_at`,
+      [id,String(body.name||'Rule'),body.enabled===false?0:1,Number(body.priority||100),JSON.stringify(body.conditions||{}),JSON.stringify(body.actions||{}),body.stopProcessing?1:0,now,now]);
+    return{id} as T;
+  }
+
+  if(path==='/api/signatures'&&method==='GET')return await all<any>('SELECT * FROM signatures ORDER BY name') as T;
+  if(path==='/api/signatures'&&method==='POST'){
+    const id=body.id||uid('sig_'),now=isoNow();
+    await run(`INSERT INTO signatures(id,name,text_body,html_body,created_at,updated_at) VALUES(?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name,text_body=excluded.text_body,html_body=excluded.html_body,updated_at=excluded.updated_at`,
+      [id,String(body.name||'Signature'),String(body.textBody||''),body.htmlBody||null,now,now]);
+    return{id} as T;
+  }
+
+  if(path==='/api/templates'&&method==='GET')return await all<any>('SELECT * FROM templates ORDER BY name') as T;
+  if(path==='/api/templates'&&method==='POST'){
+    const id=body.id||uid('tpl_'),now=isoNow();
+    await run(`INSERT INTO templates(id,name,subject,text_body,alias_pattern,language,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name,subject=excluded.subject,text_body=excluded.text_body,alias_pattern=excluded.alias_pattern,language=excluded.language,updated_at=excluded.updated_at`,
+      [id,String(body.name||'Template'),String(body.subject||''),String(body.textBody||''),body.aliasPattern||null,body.language||null,now,now]);
+    return{id} as T;
+  }
+
+  if(path==='/api/contacts'&&method==='GET')return await all<any>('SELECT * FROM contact_memory ORDER BY last_contact_at DESC LIMIT 500') as T;
 
   if(path==='/api/accounts'&&method==='GET')return await accountsPublic() as T;
   if(path==='/api/accounts'&&method==='POST')return await addAccount(body) as T;

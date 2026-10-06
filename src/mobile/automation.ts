@@ -85,7 +85,7 @@ function hasAutomatedHeader(message: any): boolean {
   return /auto(?:matic)?[- ]?reply|out of office|delivery status|mailer-daemon/i.test(text);
 }
 
-export async function evaluateInbound(messageId: string): Promise<AutomationDecision | null> {
+export async function evaluateInbound(messageId: string, modeOverride?: string | null): Promise<AutomationDecision | null> {
   const message: any = await one('SELECT * FROM messages WHERE id=? AND direction=?', [messageId, 'inbound']);
   if (!message) return null;
   const alreadyHandled=await one('SELECT 1 handled FROM automation_audit WHERE message_id=? LIMIT 1',[messageId]);
@@ -122,7 +122,17 @@ export async function evaluateInbound(messageId: string): Promise<AutomationDeci
   }
 
   const threshold = Number(rule.confidence_threshold || 0.92);
-  const mode = String(rule.mode || 'draft');
+  const requestedMode=String(modeOverride||'inherit').toLowerCase();
+  if(requestedMode==='off'||requestedMode==='disabled'||requestedMode==='never'){
+    await audit({messageId,decision,executed:false,error:'Autonomous reply disabled by alias/routing policy'});
+    return decision;
+  }
+  // A deterministic alias/routing policy may make automation stricter or,
+  // when explicitly set to auto_safe, opt this identity into the existing
+  // safety-gated auto-send policy. Sensitive categories remain blocked by
+  // canAutoSend regardless of this override.
+  const mode = requestedMode==='inherit' ? String(rule.mode || 'draft')
+    : (requestedMode==='auto'||requestedMode==='auto_safe' ? 'auto_safe' : 'draft');
   const autoAllowed = canAutoSend({
     mode,
     category: decision.category,
