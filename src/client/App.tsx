@@ -54,6 +54,7 @@ function App() {
   const [mobileFoldersOpen,setMobileFoldersOpen] = useState(false);
   const [mobileSearchOpen,setMobileSearchOpen] = useState(false);
   const [translations,setTranslations] = useState<Record<string,{text:string;backTranslation:string}>>({});
+  const [pendingUndo,setPendingUndo]=useState<{id:string;until:string}|null>(null);
   const draftTimer = useRef<number|null>(null);
   const mobileSearchRef = useRef<HTMLInputElement|null>(null);
 
@@ -156,7 +157,18 @@ function App() {
       })});
       setCompose(null);
       if(result.status==='queued') setError(result.error ? `Queued locally: ${result.error}` : 'Queued locally and will send automatically when online.');
-      if(result.status==='scheduled') setError(options.undoSeconds ? `Send queued with ${options.undoSeconds}s Undo window.` : `Scheduled for ${new Date(result.scheduledAt||options.scheduledAt||'').toLocaleString()}.`);
+      if(result.status==='scheduled'){
+        if(options.undoSeconds&&result.id&&result.undoUntil){
+          setPendingUndo({id:result.id,until:result.undoUntil});
+          const delay=Math.max(250,new Date(result.undoUntil).getTime()-Date.now()+350);
+          window.setTimeout(()=>{
+            setPendingUndo(prev=>prev?.id===result.id?null:prev);
+            void api('/api/sync',{method:'POST'}).catch(()=>undefined);
+          },delay);
+        }else{
+          setError(`Scheduled for ${new Date(result.scheduledAt||options.scheduledAt||'').toLocaleString()}.`);
+        }
+      }
       await Promise.all([loadList(),refreshStatus()]);
     } catch(e){setError(e instanceof Error?e.message:String(e));}
     finally{setBusy(false);}
@@ -403,6 +415,7 @@ function App() {
       </section>
     </div>}
 
+    {pendingUndo&&<div className="undoSnackbar"><span>Message will send shortly.</span><button onClick={()=>void (async()=>{await api(`/api/scheduled/${pendingUndo.id}/cancel`,{method:'POST'});setPendingUndo(null);setError('Send cancelled.');await loadList();})()}>Undo</button></div>}
     {intelligenceOpen&&<IntelligencePanel onClose={()=>setIntelligenceOpen(false)} onOpenThread={id=>void openThreadId(id)} onError={message=>setError(message)}/>}
     {compose&&<Compose value={compose} identities={identities} busy={busy} onChange={setCompose} onClose={()=>setCompose(null)} onSend={options=>void send(options)}/>}
     {settingsOpen&&<SettingsPanel onClose={()=>setSettingsOpen(false)} onChanged={()=>void Promise.all([api<Identity[]>('/api/identities').then(setIdentities),refreshStatus(),loadList()])} onError={setError}/>}
