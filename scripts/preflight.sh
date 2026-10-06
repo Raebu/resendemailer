@@ -20,6 +20,7 @@ echo
 echo "== GIBP Mail application checks =="
 npm run check
 npm run security:scan
+npm run worker:check
 
 echo
 echo "== Android project =="
