@@ -52,7 +52,7 @@ echo "SHA-256: $HASH"
 
 if [[ "${INSTALL_TO_PHONE:-0}" == "1" ]]; then
   echo
-  "$ROOT/scripts/install-phone.sh" "$APK"
+  bash "$ROOT/scripts/install-phone.sh" "$APK"
 else
   echo
   echo "To install on a connected phone:"
