@@ -315,6 +315,7 @@ function App() {
                   {m.waiting&&<span className="intelBadge waiting">Waiting</span>}
                   {m.attachmentCount>0&&<span><MailIcon name="attach" size={14}/>{m.attachmentCount}</span>}
                   {m.status==='queued'&&<span className="queued">Queued</span>}
+                  {m.direction==='outbound'&&['delivered','delayed','bounced','complained','failed'].includes(m.status)&&<span className={`deliveryBadge ${m.status}`}>{m.status}</span>}
                 </div>
                 {m.whyItMatters&&<p className="whyItMatters">{m.whyItMatters}</p>}
               </div>
