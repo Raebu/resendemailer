@@ -1,15 +1,13 @@
 import { CapacitorHttp } from '@capacitor/core';
 import { all, isoNow, json, one, run, uid } from './db.js';
 import { queueAndSend } from './sync.js';
+import { emailDomain, routingRuleMatches, wildcardMatch } from '../shared/intelligence.js';
 
 type AliasRow={id:string;account_id:string;address:string;pattern:string|null;persona:string|null;tone:string|null;default_language:string;folder:string|null;notification_priority:string;ai_mode:string;signature_id:string|null;forward_to_json:string;is_dynamic:number};
 type Intel={category:string;priority:string;needs_reply:boolean;needs_me:boolean;waiting:boolean;language:string;why_it_matters:string;summary:string;actions:any[];deadline_at:string|null;labels:string[];confidence:number;sensitive:boolean};
 
 const lower=(v:any)=>String(v||'').trim().toLowerCase();
-const domain=(email:string)=>lower(email).split('@').at(-1)||'';
 const parseEmail=(v:string)=>lower(v.match(/<([^<>\s]+@[^<>\s]+)>/)?.[1]||v);
-function wildcard(pattern:string,value:string){const e=pattern.replace(/[.+^${}()|[\]\\]/g,'\\$&').replace(/\*/g,'.*').replace(/\?/g,'.');return new RegExp(`^${e}$`,'i').test(value);}
-
 async function setting(key:string){return (await one<{value:string}>('SELECT value FROM settings WHERE key=?',[key]))?.value||null;}
 async function ai(path:string,payload:any){
   const url=await setting('ai_gateway_url'),token=await setting('ai_gateway_token');
@@ -22,12 +20,12 @@ async function ai(path:string,payload:any){
 export async function resolveAlias(message:any):Promise<AliasRow|null>{
   const recipients=json<string[]>(message.to_json,[]).map(parseEmail);
   for(const address of recipients){
-    const account=await one<{account_id:string}>("SELECT account_id FROM domains WHERE domain=? AND status='verified' AND can_receive=1 LIMIT 1",[domain(address)]);
+    const account=await one<{account_id:string}>("SELECT account_id FROM domains WHERE domain=? AND status='verified' AND can_receive=1 LIMIT 1",[emailDomain(address)]);
     if(!account)continue;
     const rows=await all<AliasRow>('SELECT * FROM aliases WHERE enabled=1 AND account_id=? ORDER BY is_dynamic ASC,created_at ASC',[account.account_id]);
     const exact=rows.find(a=>lower(a.address)===address);
     if(exact)return exact;
-    const inherited=rows.find(a=>a.pattern&&wildcard(a.pattern.includes('@')?a.pattern:`${a.pattern}@${domain(address)}`,address));
+    const inherited=rows.find(a=>a.pattern&&wildcardMatch(a.pattern.includes('@')?a.pattern:`${a.pattern}@${emailDomain(address)}`,address));
     const id=uid('alias_'),now=isoNow();
     await run(`INSERT OR IGNORE INTO aliases(id,account_id,address,pattern,persona,tone,default_language,folder,notification_priority,ai_mode,signature_id,forward_to_json,is_dynamic,enabled,created_at,updated_at)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,1,?,?)`,[id,account.account_id,address,null,inherited?.persona||null,inherited?.tone||null,inherited?.default_language||'auto',inherited?.folder||null,inherited?.notification_priority||'normal',inherited?.ai_mode||'inherit',inherited?.signature_id||null,inherited?.forward_to_json||'[]',now,now]);
@@ -36,31 +34,23 @@ export async function resolveAlias(message:any):Promise<AliasRow|null>{
   return null;
 }
 
-function matchRule(c:any,ctx:any){
-  if(c.to&&!wildcard(c.to,ctx.to))return false;if(c.from&&!wildcard(c.from,ctx.from))return false;
-  if(c.fromDomain&&lower(c.fromDomain)!==domain(ctx.from))return false;
-  if(c.subjectContains&&!lower(ctx.subject).includes(lower(c.subjectContains)))return false;
-  if(c.bodyContains&&!lower(ctx.body).includes(lower(c.bodyContains)))return false;
-  if(c.hasAttachment!==undefined&&Boolean(c.hasAttachment)!==ctx.hasAttachment)return false;
-  return true;
-}
 async function deterministicRoute(message:any,alias:AliasRow|null,intel:Partial<Intel>){
   const ctx={to:alias?.address||json<string[]>(message.to_json,[])[0]||'',from:parseEmail(message.from_address),subject:message.subject||'',body:message.text_body||message.preview||'',hasAttachment:Boolean(await one('SELECT 1 x FROM attachments WHERE message_id=? LIMIT 1',[message.id]))};
   const out:any={priority:intel.priority||'normal',needsReply:Boolean(intel.needs_reply),needsMe:Boolean(intel.needs_me),waiting:Boolean(intel.waiting),labels:Array.isArray(intel.labels)?intel.labels:[],archive:false,snooze:null,reminder:null,forwardTo:alias?json<string[]>(alias.forward_to_json,[]):[]};
   for(const r of await all<any>('SELECT * FROM routing_rules WHERE enabled=1 ORDER BY priority,created_at')){
-    const c=json<any>(r.conditions_json,{});if(!matchRule(c,ctx))continue;const a=json<any>(r.actions_json,{});
+    const c=json<any>(r.conditions_json,{});if(!routingRuleMatches(c,ctx))continue;const a=json<any>(r.actions_json,{});
     if(a.priority)out.priority=a.priority;if(a.label)out.labels=[...new Set([...out.labels,a.label])];if(a.needsReply!==undefined)out.needsReply=!!a.needsReply;if(a.needsMe!==undefined)out.needsMe=!!a.needsMe;if(a.waiting!==undefined)out.waiting=!!a.waiting;if(a.archive!==undefined)out.archive=!!a.archive;if(a.snoozeUntil)out.snooze=a.snoozeUntil;if(a.reminderAt)out.reminder=a.reminderAt;if(a.forwardTo)out.forwardTo=[...new Set([...out.forwardTo,...(Array.isArray(a.forwardTo)?a.forwardTo:[a.forwardTo])].map(String))];if(r.stop_processing)break;
   }
   return out;
 }
 
 export async function resolveOutboundAlias(addressInput:string):Promise<AliasRow|null>{
-  const address=parseEmail(addressInput),d=domain(address);
+  const address=parseEmail(addressInput),d=emailDomain(address);
   const account=await one<{account_id:string}>("SELECT account_id FROM domains WHERE domain=? AND status='verified' AND can_send=1 LIMIT 1",[d]);
   if(!account)return null;
   const rows=await all<AliasRow>('SELECT * FROM aliases WHERE enabled=1 AND account_id=? ORDER BY is_dynamic ASC,created_at ASC',[account.account_id]);
   const exact=rows.find(a=>lower(a.address)===address);if(exact)return exact;
-  const inherited=rows.find(a=>a.pattern&&wildcard(a.pattern.includes('@')?a.pattern:`${a.pattern}@${d}`,address));
+  const inherited=rows.find(a=>a.pattern&&wildcardMatch(a.pattern.includes('@')?a.pattern:`${a.pattern}@${d}`,address));
   const id=uid('alias_'),now=isoNow();
   await run(`INSERT OR IGNORE INTO aliases(id,account_id,address,pattern,persona,tone,default_language,folder,notification_priority,ai_mode,signature_id,forward_to_json,is_dynamic,enabled,created_at,updated_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,1,?,?)`,[
