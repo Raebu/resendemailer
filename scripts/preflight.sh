@@ -13,11 +13,10 @@ node_major="$(node -p "Number(process.versions.node.split('.')[0])")"
   exit 2
 }
 
-[[ -d node_modules ]] || {
-  echo "node_modules is missing. Run npm install first." >&2
-  exit 2
-}
+echo "== Deterministic dependency install =="
+npm ci
 
+echo
 echo "== GIBP Mail application checks =="
 npm run check
 npm run security:scan
