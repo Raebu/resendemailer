@@ -36,10 +36,10 @@ export async function resolveAlias(message:any):Promise<AliasRow|null>{
 
 async function deterministicRoute(message:any,alias:AliasRow|null,intel:Partial<Intel>){
   const ctx={to:alias?.address||json<string[]>(message.to_json,[])[0]||'',from:parseEmail(message.from_address),subject:message.subject||'',body:message.text_body||message.preview||'',hasAttachment:Boolean(await one('SELECT 1 x FROM attachments WHERE message_id=? LIMIT 1',[message.id]))};
-  const out:any={priority:intel.priority||'normal',needsReply:Boolean(intel.needs_reply),needsMe:Boolean(intel.needs_me),waiting:Boolean(intel.waiting),labels:Array.isArray(intel.labels)?intel.labels:[],archive:false,snooze:null,reminder:null,forwardTo:alias?json<string[]>(alias.forward_to_json,[]):[]};
+  const out:any={priority:intel.priority||'normal',needsReply:Boolean(intel.needs_reply),needsMe:Boolean(intel.needs_me),waiting:Boolean(intel.waiting),labels:Array.isArray(intel.labels)?intel.labels:[],archive:false,snooze:null,reminder:null,forwardTo:alias?json<string[]>(alias.forward_to_json,[]):[],aiMode:alias?.ai_mode||'inherit'};
   for(const r of await all<any>('SELECT * FROM routing_rules WHERE enabled=1 ORDER BY priority,created_at')){
     const c=json<any>(r.conditions_json,{});if(!routingRuleMatches(c,ctx))continue;const a=json<any>(r.actions_json,{});
-    if(a.priority)out.priority=a.priority;if(a.label)out.labels=[...new Set([...out.labels,a.label])];if(a.needsReply!==undefined)out.needsReply=!!a.needsReply;if(a.needsMe!==undefined)out.needsMe=!!a.needsMe;if(a.waiting!==undefined)out.waiting=!!a.waiting;if(a.archive!==undefined)out.archive=!!a.archive;if(a.snoozeUntil)out.snooze=a.snoozeUntil;if(a.reminderAt)out.reminder=a.reminderAt;if(a.forwardTo)out.forwardTo=[...new Set([...out.forwardTo,...(Array.isArray(a.forwardTo)?a.forwardTo:[a.forwardTo])].map(String))];if(r.stop_processing)break;
+    if(a.priority)out.priority=a.priority;if(a.label)out.labels=[...new Set([...out.labels,a.label])];if(a.needsReply!==undefined)out.needsReply=!!a.needsReply;if(a.needsMe!==undefined)out.needsMe=!!a.needsMe;if(a.waiting!==undefined)out.waiting=!!a.waiting;if(a.archive!==undefined)out.archive=!!a.archive;if(a.snoozeUntil)out.snooze=a.snoozeUntil;if(a.reminderAt)out.reminder=a.reminderAt;if(a.forwardTo)out.forwardTo=[...new Set([...out.forwardTo,...(Array.isArray(a.forwardTo)?a.forwardTo:[a.forwardTo])].map(String))];if(a.aiMode||a.aiPolicy)out.aiMode=String(a.aiMode||a.aiPolicy);if(r.stop_processing)break;
   }
   return out;
 }
@@ -69,8 +69,21 @@ export async function composeContext(address:string){
 
 export async function analyzeInbound(messageId:string){
   const m=await one<any>("SELECT * FROM messages WHERE id=? AND direction='inbound'",[messageId]);if(!m)return null;
-  const alias=await resolveAlias(m);let intel:Partial<Intel>={};
-  try{intel=await ai('/v1/intelligence',{subject:m.subject||'',from:m.from_address,to:json(m.to_json,[]),text:String(m.text_body||m.preview||'').slice(0,30000),alias:alias?{address:alias.address,persona:alias.persona,tone:alias.tone}:null});}catch{}
+  const alias=await resolveAlias(m);
+  // Deterministic routing is deliberately evaluated before AI. The resulting
+  // policy is supplied as fixed context, then re-applied after classification
+  // so a model can never weaken an explicit mailbox rule.
+  const preRoute=await deterministicRoute(m,alias,{});
+  let intel:Partial<Intel>={};
+  try{intel=await ai('/v1/intelligence',{
+    subject:m.subject||'',from:m.from_address,to:json(m.to_json,[]),
+    text:String(m.text_body||m.preview||'').slice(0,30000),
+    alias:alias?{address:alias.address,persona:alias.persona,tone:alias.tone}:null,
+    routing_policy:{
+      priority:preRoute.priority,needs_reply:preRoute.needsReply,needs_me:preRoute.needsMe,
+      waiting:preRoute.waiting,labels:preRoute.labels,automation_mode:preRoute.aiMode,
+    },
+  });}catch{}
   const route=await deterministicRoute(m,alias,intel),now=isoNow();
   const final:Intel={category:String(intel.category||'unclassified'),priority:String(route.priority||'normal'),needs_reply:!!route.needsReply,needs_me:!!route.needsMe,waiting:!!route.waiting,language:String(intel.language||'unknown'),why_it_matters:String(intel.why_it_matters||''),summary:String(intel.summary||m.preview||''),actions:Array.isArray(intel.actions)?intel.actions:[],deadline_at:intel.deadline_at?String(intel.deadline_at):null,labels:route.labels||[],confidence:Number(intel.confidence||0),sensitive:!!intel.sensitive};
   await run(`INSERT INTO message_intelligence(message_id,alias_id,category,priority,needs_reply,needs_me,waiting,language,why_it_matters,summary,actions_json,deadline_at,labels_json,ai_confidence,analyzed_at)
@@ -91,7 +104,7 @@ export async function analyzeInbound(messageId:string){
       text:`Forwarded automatically by GIBP Mail routing.\n\nFrom: ${m.from_address}\nTo: ${json<string[]>(m.to_json,[]).join(', ')}\nSubject: ${m.subject||''}\n\n${m.text_body||m.preview||''}`,
     });
   }
-  return final;
+  return {...final,automation_mode:String(route.aiMode||'inherit')};
 }
 
 export async function createReminder(threadId:string,messageId:string|null,kind:string,dueAt:string,note=''){const id=uid('rem_'),now=isoNow();await run('INSERT INTO reminders(id,thread_id,message_id,kind,due_at,state,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',[id,threadId,messageId,kind,dueAt,'pending',note,now,now]);return id;}
