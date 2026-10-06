@@ -2,12 +2,6 @@ name: Deploy GIBP Mail Workers
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "workers/ai-gateway/**"
-      - "workers/event-relay/**"
-      - ".github/workflows/deploy-workers.yml"
 
 permissions:
   contents: read
