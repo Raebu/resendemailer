@@ -28,6 +28,14 @@ const searchSchema={type:'object',additionalProperties:false,properties:{
   },required:['threadId','reason','score']}},
 },required:['matches']};
 
+const attachmentSummarySchema={type:'object',additionalProperties:false,properties:{
+  summary:{type:'string'},
+  key_points:{type:'array',maxItems:12,items:{type:'string'}},
+  actions:{type:'array',maxItems:12,items:{type:'string'}},
+  risks:{type:'array',maxItems:12,items:{type:'string'}},
+  language:{type:'string'},
+},required:['summary','key_points','actions','risks','language']};
+
 const briefingSchema={type:'object',additionalProperties:false,properties:{
   title:{type:'string'},summary:{type:'string'},
   priorities:{type:'array',maxItems:20,items:{type:'object',additionalProperties:false,properties:{
@@ -53,6 +61,23 @@ async function structured(env:Env,name:string,schema:any,system:string,user:any)
   if(!upstream.ok)return Response.json({error:raw?.error?.message||'OpenAI request failed'},{status:502});
   try{return Response.json(JSON.parse(extractText(raw)),{headers:{'Cache-Control':'no-store'}});}
   catch{return Response.json({error:'Invalid structured AI response'},{status:502});}
+}
+async function structuredFile(env:Env,name:string,schema:any,system:string,input:any):Promise<Response>{
+  const filename=String(input?.filename||'attachment').slice(0,240);
+  const fileData=String(input?.file_data||'');
+  if(!fileData||fileData.length>12_000_000)return Response.json({error:'Attachment is missing or too large'},{status:413});
+  const payload={model:env.OPENAI_MODEL||'gpt-5.6-luna',store:false,input:[
+    {role:'system',content:[{type:'input_text',text:system}]},
+    {role:'user',content:[
+      {type:'input_text',text:JSON.stringify({filename,content_type:String(input?.content_type||'application/octet-stream')})},
+      {type:'input_file',filename,file_data:fileData},
+    ]},
+  ],text:{format:{type:'json_schema',name,strict:true,schema}}};
+  const upstream=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{Authorization:`Bearer ${env.OPENAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const raw:any=await upstream.json();
+  if(!upstream.ok)return Response.json({error:raw?.error?.message||'OpenAI file analysis failed'},{status:502});
+  try{return Response.json(JSON.parse(extractText(raw)),{headers:{'Cache-Control':'no-store'}});}
+  catch{return Response.json({error:'Invalid structured attachment summary'},{status:502});}
 }
 
 export default {
@@ -101,6 +126,15 @@ export default {
         'Rank the supplied mailbox metadata against the natural-language search request.',
         'Return only genuinely relevant threads. Use the supplied threadId exactly.',
         'Do not infer facts not present in the items.',
+      ].join(' '),input);
+    }
+
+    if(path==='/v1/attachment-summary'){
+      return structuredFile(env,'attachment_summary',attachmentSummarySchema,[
+        'Summarize the attached business file faithfully and concisely.',
+        'Identify material key points, explicit actions or deadlines, and genuine risks or caveats.',
+        'Do not invent facts, amounts, obligations or conclusions that are not in the file.',
+        'If the file is unreadable or content is ambiguous, say so in the summary rather than guessing.',
       ].join(' '),input);
     }
 
