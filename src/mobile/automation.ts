@@ -1,7 +1,7 @@
 import { CapacitorHttp } from '@capacitor/core';
 import { all, isoNow, json, nextRevision, one, run, uid } from './db.js';
 import { queueAndSend } from './sync.js';
-import { AUTO_SAFE_CATEGORIES, canAutoSend } from '../shared/policy.js';
+import { AUTO_SAFE_CATEGORIES, autoReplyLocalId, campaignSendLocalId, campaignWithinGlobalHourlyCap, canAutoSend, containsStopLanguage } from '../shared/policy.js';
 
 export type AutomationAction =
   | 'no_action' | 'draft_reply' | 'send_reply' | 'schedule_followup'
@@ -113,7 +113,7 @@ export async function evaluateInbound(messageId: string): Promise<AutomationDeci
     return fallback;
   }
 
-  if (decision.unsubscribe || /unsubscribe|do not contact|stop emailing|remove me/i.test(String(message.text_body || ''))) {
+  if (decision.unsubscribe || containsStopLanguage(String(message.text_body || ''))) {
     await run(
       'INSERT INTO suppressions(email,reason,created_at) VALUES(?,?,?) ON CONFLICT(email) DO UPDATE SET reason=excluded.reason',
       [sender, 'unsubscribe', isoNow()],
@@ -140,7 +140,7 @@ export async function evaluateInbound(messageId: string): Promise<AutomationDeci
       if(!replyFrom) throw new Error('No verified local recipient address is available for autonomous reply');
       const providerKey=String(message.provider_id||message.id);
       const result = await queueAndSend({
-        localId:`reply_${message.account_id}_${providerKey}`,
+        localId:autoReplyLocalId(message.account_id,providerKey),
         from: replyFrom,
         to: [sender],
         subject: decision.subject || (/^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`),
@@ -214,7 +214,7 @@ export async function runCampaignTick(campaignId?: string): Promise<{ attempted:
     const globalPerHour=await globalCampaignSendCountLastHour();
     const perHour = await campaignSendCount(campaign.id, 'hour');
     const perDay = await campaignSendCount(campaign.id, 'day');
-    if (globalPerHour >= 25 || perHour >= Math.min(25, Number(campaign.max_per_hour || 25)) || perDay >= Number(campaign.max_per_day || 100)) continue;
+    if (!campaignWithinGlobalHourlyCap(globalPerHour,25) || perHour >= Math.min(25, Number(campaign.max_per_hour || 25)) || perDay >= Number(campaign.max_per_day || 100)) continue;
 
     const contact = await one<any>(
       `SELECT * FROM campaign_contacts
@@ -256,7 +256,7 @@ export async function runCampaignTick(campaignId?: string): Promise<{ attempted:
 
     decision.action='create_outreach';
     const result = await queueAndSend({
-      localId:`bd_${campaign.id}_${contact.id}_${contact.step}`,
+      localId:campaignSendLocalId(campaign.id,contact.id,Number(contact.step||0)),
       from:campaign.from_address,
       to:[contact.email],
       subject:decision.subject || campaign.name,
