@@ -10,9 +10,16 @@ command -v adb >/dev/null 2>&1 || {
   exit 2
 }
 
+if [[ ! -f "$APK" ]]; then
+  echo "APK not found; running deterministic preflight build first."
+  (
+    cd "$ROOT"
+    INSTALL_TO_PHONE=0 npm run preflight
+  )
+fi
+
 [[ -f "$APK" ]] || {
-  echo "APK not found: $APK" >&2
-  echo "Build it first with: npm run android:debug" >&2
+  echo "APK was not produced: $APK" >&2
   exit 2
 }
 
