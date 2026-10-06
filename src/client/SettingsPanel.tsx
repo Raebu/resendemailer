@@ -294,6 +294,66 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
             </div>)}
           </section>
 
+          <section className="settingsCard settingsWide">
+            <h3><MailIcon name="sparkles" size={18}/>Alias & identity intelligence</h3>
+            <p>Exact addresses and wildcard families inherit persona, tone, language and signature. New verified-domain aliases are registered locally on first use.</p>
+            <div className="miniForm">
+              <select className={inputClass} value={aliasAccount} onChange={e=>setAliasAccount(e.target.value)}>
+                <option value="">Resend account</option>{accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <input className={inputClass} value={aliasAddress} onChange={e=>setAliasAddress(e.target.value)} placeholder="banking@gibp.global"/>
+              <input className={inputClass} value={aliasPattern} onChange={e=>setAliasPattern(e.target.value)} placeholder="Optional family pattern: bank-*"/>
+              <input className={inputClass} value={aliasPersona} onChange={e=>setAliasPersona(e.target.value)} placeholder="Persona: Banking / Partnerships / Support"/>
+              <select className={inputClass} value={aliasTone} onChange={e=>setAliasTone(e.target.value)}>
+                <option value="professional">Professional</option><option value="formal">Formal</option><option value="friendly">Friendly</option>
+                <option value="banking">Banking</option><option value="partnership">Partnership</option><option value="support">Support</option><option value="sales">Sales</option>
+              </select>
+              <select className={inputClass} value={aliasLanguage} onChange={e=>setAliasLanguage(e.target.value)}>
+                <option value="auto">Auto language</option><option>English</option><option>Nepali</option><option>Hindi</option><option>French</option><option>German</option><option>Spanish</option><option>Arabic</option><option>Chinese</option>
+              </select>
+              <select className={inputClass} value={aliasSignature} onChange={e=>setAliasSignature(e.target.value)}>
+                <option value="">No signature</option>{signatures.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              <button className="settingsPrimary" disabled={busy} onClick={()=>void saveAlias()}>Save alias / family</button>
+            </div>
+            <div className="settingsList">
+              {aliases.slice(0,20).map(a=><article key={a.id}>
+                <div><b>{a.address}</b><small>{a.pattern?`inherits ${a.pattern} • `:''}{a.persona||'Default persona'} • {a.default_language||'auto'}{a.is_dynamic?' • auto-registered':''}</small></div>
+                <span className="pill ok">{a.ai_mode||'inherit'}</span>
+              </article>)}
+              {!aliases.length&&<em>Aliases will also appear automatically when mail is received or a new verified-domain sender is used.</em>}
+            </div>
+          </section>
+
+          <section className="settingsCard">
+            <h3><MailIcon name="priority" size={18}/>Rules before AI</h3>
+            <p>Conditions run deterministically before AI classification. Use JSON so multiple conditions/actions stay explicit and auditable.</p>
+            <input className={inputClass} value={routeName} onChange={e=>setRouteName(e.target.value)} placeholder="Banking is always high priority"/>
+            <textarea className={inputClass} value={routeConditions} onChange={e=>setRouteConditions(e.target.value)} aria-label="Rule conditions JSON"/>
+            <textarea className={inputClass} value={routeActions} onChange={e=>setRouteActions(e.target.value)} aria-label="Rule actions JSON"/>
+            <button className="settingsPrimary" disabled={busy} onClick={()=>void saveRoutingRule()}>Add routing rule</button>
+            <div className="settingsList">{routingRules.slice(0,12).map(r=><article key={r.id}><div><b>{r.name}</b><small className="ruleSummary">{r.conditions_json} → {r.actions_json}</small></div><span className={r.enabled?'pill ok':'pill warn'}>{r.enabled?'On':'Off'}</span></article>)}</div>
+          </section>
+
+          <section className="settingsCard">
+            <h3><MailIcon name="draft" size={18}/>Signatures & templates</h3>
+            <p>Signatures are applied server-side once, so retries cannot duplicate them. Templates can be selected directly in Compose.</p>
+            <div className="intelligenceSettingsGrid">
+              <input className={inputClass} value={signatureName} onChange={e=>setSignatureName(e.target.value)} placeholder="Signature name"/>
+              <textarea className={inputClass} value={signatureBody} onChange={e=>setSignatureBody(e.target.value)} placeholder={"Martin Raeburn\nGIBP"}/>
+              <button className="settingsPrimary" disabled={busy} onClick={()=>void saveSignature()}>Save signature</button>
+              <input className={inputClass} value={templateName} onChange={e=>setTemplateName(e.target.value)} placeholder="Template name"/>
+              <input className={inputClass} value={templateSubject} onChange={e=>setTemplateSubject(e.target.value)} placeholder="Subject"/>
+              <textarea className={inputClass} value={templateBody} onChange={e=>setTemplateBody(e.target.value)} placeholder="Reusable message body"/>
+              <input className={inputClass} value={templateLanguage} onChange={e=>setTemplateLanguage(e.target.value)} placeholder="Optional language"/>
+              <button className="settingsPrimary" disabled={busy} onClick={()=>void saveTemplate()}>Save template</button>
+            </div>
+            <div className="settingsList">
+              {signatures.map(s=><article key={s.id}><div><b>{s.name}</b><small>{String(s.text_body||'').split('\n')[0]}</small></div><span className="pill ok">Signature</span></article>)}
+              {templates.map(t=><article key={t.id}><div><b>{t.name}</b><small>{t.subject||'No subject'}{t.language?` • ${t.language}`:''}</small></div><span className="pill ok">Template</span></article>)}
+            </div>
+          </section>
+
           <section className="settingsCard">
             <h3><MailIcon name="sync" size={18}/>PC replica</h3>
             <p>The phone is authoritative. When your PC is reachable, changed revisions and local attachments are pushed to it over HTTPS.</p>
