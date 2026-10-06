@@ -5,6 +5,7 @@ import { accountForSender, flushMobileOutbox, refreshDomains, queueAndSend, sync
 import { configureAi, createDefaultRule, evaluateInbound, reconcileCampaignReplies, runCampaignTick } from './automation.js';
 import { pushAllReplicas, pushReplicaTarget } from './replica.js';
 import { configureBackgroundAccount, removeBackgroundAccount, configureBackgroundAutomation, setBackgroundAutomationMode, setBackgroundSuppressions, setBackgroundForegroundAudit, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
+import { analyzeInbound, attentionBriefing, createReminder, languageTransform, markWaiting, smartSearch, snoozeThread } from './intelligence.js';
 
 let syncing=false;
 const parseBody=(init:RequestInit):any=>{
@@ -17,6 +18,10 @@ const toSummary=(r:any)=>({
   subject:r.subject,preview:r.preview,createdAt:r.created_at,receivedAt:r.received_at,sentAt:r.sent_at,
   isRead:Boolean(r.is_read),isStarred:Boolean(r.is_starred),isArchived:Boolean(r.is_archived),deletedAt:r.deleted_at,
   attachmentCount:Number(r.attachment_count||0),threadCount:Number(r.thread_count||1),
+  category:r.category||null,priority:r.priority||null,needsReply:Boolean(r.needs_reply),needsMe:Boolean(r.needs_me),
+  waiting:Boolean(r.waiting),language:r.language||null,whyItMatters:r.why_it_matters||null,
+  intelligenceSummary:r.intelligence_summary||null,labels:json(r.labels_json,[]),aliasAddress:r.alias_address||null,
+  snoozedUntil:r.snoozed_until||null,
 });
 const detail=async(r:any)=>({
   ...toSummary(r),bccAddresses:json(r.bcc_json,[]),replyToAddresses:json(r.reply_to_json,[]),
@@ -38,6 +43,9 @@ async function listMessages(url:URL):Promise<any[]>{
   else if(folder==='archive')where+=' AND m.is_archived=1';
   else if(folder==='trash')where='m.deleted_at IS NOT NULL';
   else if(folder==='starred')where+=' AND m.is_starred=1';
+  else if(folder==='needs_me')where+=' AND coalesce(mi.needs_me,0)=1';
+  else if(folder==='waiting')where+=" AND (coalesce(mi.waiting,0)=1 OR EXISTS(SELECT 1 FROM reminders rr WHERE rr.thread_id=m.thread_id AND rr.state='pending' AND rr.kind='waiting_reply'))";
+  else if(folder==='snoozed')where+=" AND sz.until_at>datetime('now')";
   const params:any[]=[];
   if(q){where+=" AND (lower(m.subject) LIKE ? OR lower(m.from_address) LIKE ? OR lower(coalesce(m.text_body,'')) LIKE ?)";params.push(`%${q}%`,`%${q}%`,`%${q}%`);}
   const rows=await all<any>(`
@@ -233,7 +241,7 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     try{
       const result=await syncAllAccounts();
       await importBackgroundAutomationState();
-      for(const id of result.newInboundIds)await evaluateInbound(id);
+      for(const id of result.newInboundIds){await analyzeInbound(id);await evaluateInbound(id);}
       await reconcileCampaignReplies();
       await syncSuppressionsToBackground();
       await flushMobileOutbox();
