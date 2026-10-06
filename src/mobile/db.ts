@@ -77,6 +77,146 @@ CREATE TABLE IF NOT EXISTS automation_audit (
   id TEXT PRIMARY KEY, message_id TEXT, campaign_id TEXT, action TEXT NOT NULL,
   decision_json TEXT NOT NULL, executed INTEGER NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS aliases (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  address TEXT NOT NULL UNIQUE,
+  pattern TEXT,
+  display_name TEXT,
+  signature_id TEXT,
+  persona TEXT,
+  tone TEXT,
+  default_language TEXT NOT NULL DEFAULT 'auto',
+  folder TEXT,
+  color TEXT,
+  notification_priority TEXT NOT NULL DEFAULT 'normal',
+  ai_mode TEXT NOT NULL DEFAULT 'inherit',
+  forward_to_json TEXT NOT NULL DEFAULT '[]',
+  is_dynamic INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_aliases_account ON aliases(account_id,address);
+CREATE TABLE IF NOT EXISTS signatures (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  text_body TEXT NOT NULL DEFAULT '',
+  html_body TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS routing_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  priority INTEGER NOT NULL DEFAULT 100,
+  conditions_json TEXT NOT NULL DEFAULT '{}',
+  actions_json TEXT NOT NULL DEFAULT '{}',
+  stop_processing INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_routing_rules_priority ON routing_rules(enabled,priority);
+CREATE TABLE IF NOT EXISTS message_intelligence (
+  message_id TEXT PRIMARY KEY,
+  alias_id TEXT,
+  category TEXT,
+  priority TEXT NOT NULL DEFAULT 'normal',
+  needs_reply INTEGER NOT NULL DEFAULT 0,
+  needs_me INTEGER NOT NULL DEFAULT 0,
+  waiting INTEGER NOT NULL DEFAULT 0,
+  language TEXT,
+  why_it_matters TEXT,
+  summary TEXT,
+  actions_json TEXT NOT NULL DEFAULT '[]',
+  deadline_at TEXT,
+  labels_json TEXT NOT NULL DEFAULT '[]',
+  ai_confidence REAL,
+  analyzed_at TEXT,
+  FOREIGN KEY(message_id) REFERENCES messages(id)
+);
+CREATE TABLE IF NOT EXISTS reminders (
+  id TEXT PRIMARY KEY,
+  thread_id TEXT NOT NULL,
+  message_id TEXT,
+  kind TEXT NOT NULL,
+  due_at TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  note TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(state,due_at);
+CREATE TABLE IF NOT EXISTS snoozes (
+  thread_id TEXT PRIMARY KEY,
+  until_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS templates (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  subject TEXT NOT NULL DEFAULT '',
+  text_body TEXT NOT NULL DEFAULT '',
+  alias_pattern TEXT,
+  language TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS scheduled_sends (
+  id TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  scheduled_at TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'scheduled',
+  undo_until TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_sends_due ON scheduled_sends(state,scheduled_at);
+CREATE TABLE IF NOT EXISTS delivery_events (
+  id TEXT PRIMARY KEY,
+  provider_event_id TEXT UNIQUE,
+  account_id TEXT,
+  provider_message_id TEXT,
+  local_message_id TEXT,
+  event_type TEXT NOT NULL,
+  recipient TEXT,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  occurred_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_events_message ON delivery_events(local_message_id,occurred_at);
+CREATE TABLE IF NOT EXISTS translations (
+  id TEXT PRIMARY KEY,
+  message_id TEXT,
+  draft_id TEXT,
+  source_language TEXT,
+  target_language TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  original_text TEXT NOT NULL,
+  translated_text TEXT NOT NULL,
+  back_translation TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS contact_memory (
+  email TEXT PRIMARY KEY,
+  name TEXT,
+  company TEXT,
+  preferred_language TEXT,
+  last_thread_id TEXT,
+  last_contact_at TEXT,
+  notes TEXT,
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS briefings (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  content_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS replica_targets (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, token TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1, last_revision INTEGER NOT NULL DEFAULT 0,
