@@ -307,6 +307,61 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
   }
   if(path.startsWith('/api/drafts/')&&method==='DELETE'){await run('DELETE FROM drafts WHERE id=?',[decodeURIComponent(path.split('/').pop()!)]);return{ok:true} as T;}
   if(path==='/api/send'&&method==='POST')return await queueAndSend(body) as T;
+  if(path==='/api/intelligence/briefing'&&method==='GET')return await attentionBriefing() as T;
+  if(path==='/api/intelligence/search'&&method==='POST')return await smartSearch(String(body.query||'')) as T;
+  if(path==='/api/language'&&method==='POST')return await languageTransform({
+    text:String(body.text||''),sourceLanguage:body.sourceLanguage?String(body.sourceLanguage):undefined,
+    targetLanguage:String(body.targetLanguage||'English'),mode:body.mode?String(body.mode):undefined,tone:body.tone?String(body.tone):undefined,
+  }) as T;
+  if(path==='/api/reminders'&&method==='GET')return await all<any>("SELECT * FROM reminders WHERE state='pending' ORDER BY due_at") as T;
+  if(path==='/api/reminders'&&method==='POST')return {id:await createReminder(String(body.threadId),body.messageId?String(body.messageId):null,String(body.kind||'follow_up'),String(body.dueAt),String(body.note||''))} as T;
+  if(path.startsWith('/api/reminders/')&&method==='PATCH'){
+    const id=decodeURIComponent(path.split('/').pop()!);
+    await run('UPDATE reminders SET state=?,updated_at=? WHERE id=?',[String(body.state||'done'),isoNow(),id]);
+    return{ok:true} as T;
+  }
+  if(path==='/api/snooze'&&method==='POST'){await snoozeThread(String(body.threadId),String(body.untilAt));return{ok:true} as T;}
+  if(path==='/api/waiting'&&method==='POST'){await markWaiting(String(body.threadId),body.messageId?String(body.messageId):null,body.dueAt?String(body.dueAt):undefined);return{ok:true} as T;}
+
+  if(path==='/api/aliases'&&method==='GET')return await all<any>('SELECT * FROM aliases WHERE enabled=1 ORDER BY address') as T;
+  if(path==='/api/aliases'&&method==='POST'){
+    const now=isoNow(),id=body.id||uid('alias_');
+    await run(`INSERT INTO aliases(id,account_id,address,pattern,display_name,signature_id,persona,tone,default_language,folder,color,notification_priority,ai_mode,forward_to_json,is_dynamic,enabled,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(address) DO UPDATE SET pattern=excluded.pattern,display_name=excluded.display_name,signature_id=excluded.signature_id,persona=excluded.persona,tone=excluded.tone,default_language=excluded.default_language,folder=excluded.folder,color=excluded.color,notification_priority=excluded.notification_priority,ai_mode=excluded.ai_mode,forward_to_json=excluded.forward_to_json,updated_at=excluded.updated_at`,
+      [id,String(body.accountId),String(body.address).toLowerCase(),body.pattern||null,body.displayName||null,body.signatureId||null,body.persona||null,body.tone||null,body.defaultLanguage||'auto',body.folder||null,body.color||null,body.notificationPriority||'normal',body.aiMode||'inherit',JSON.stringify(body.forwardTo||[]),body.isDynamic?1:0,1,now,now]);
+    return{id} as T;
+  }
+
+  if(path==='/api/routing-rules'&&method==='GET')return await all<any>('SELECT * FROM routing_rules ORDER BY priority,created_at') as T;
+  if(path==='/api/routing-rules'&&method==='POST'){
+    const id=body.id||uid('route_'),now=isoNow();
+    await run(`INSERT INTO routing_rules(id,name,enabled,priority,conditions_json,actions_json,stop_processing,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name,enabled=excluded.enabled,priority=excluded.priority,conditions_json=excluded.conditions_json,actions_json=excluded.actions_json,stop_processing=excluded.stop_processing,updated_at=excluded.updated_at`,
+      [id,String(body.name||'Rule'),body.enabled===false?0:1,Number(body.priority||100),JSON.stringify(body.conditions||{}),JSON.stringify(body.actions||{}),body.stopProcessing?1:0,now,now]);
+    return{id} as T;
+  }
+
+  if(path==='/api/signatures'&&method==='GET')return await all<any>('SELECT * FROM signatures ORDER BY name') as T;
+  if(path==='/api/signatures'&&method==='POST'){
+    const id=body.id||uid('sig_'),now=isoNow();
+    await run(`INSERT INTO signatures(id,name,text_body,html_body,created_at,updated_at) VALUES(?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name,text_body=excluded.text_body,html_body=excluded.html_body,updated_at=excluded.updated_at`,
+      [id,String(body.name||'Signature'),String(body.textBody||''),body.htmlBody||null,now,now]);
+    return{id} as T;
+  }
+
+  if(path==='/api/templates'&&method==='GET')return await all<any>('SELECT * FROM templates ORDER BY name') as T;
+  if(path==='/api/templates'&&method==='POST'){
+    const id=body.id||uid('tpl_'),now=isoNow();
+    await run(`INSERT INTO templates(id,name,subject,text_body,alias_pattern,language,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name,subject=excluded.subject,text_body=excluded.text_body,alias_pattern=excluded.alias_pattern,language=excluded.language,updated_at=excluded.updated_at`,
+      [id,String(body.name||'Template'),String(body.subject||''),String(body.textBody||''),body.aliasPattern||null,body.language||null,now,now]);
+    return{id} as T;
+  }
+
+  if(path==='/api/contacts'&&method==='GET')return await all<any>('SELECT * FROM contact_memory ORDER BY last_contact_at DESC LIMIT 500') as T;
 
   if(path==='/api/accounts'&&method==='GET')return await accountsPublic() as T;
   if(path==='/api/accounts'&&method==='POST')return await addAccount(body) as T;
