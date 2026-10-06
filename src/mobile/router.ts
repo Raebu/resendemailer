@@ -260,7 +260,10 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     try{
       const result=await syncAllAccounts();
       await importBackgroundAutomationState();
-      for(const id of result.newInboundIds){await analyzeInbound(id);await evaluateInbound(id);}
+      for(const id of result.newInboundIds){
+        const intelligence=await analyzeInbound(id);
+        await evaluateInbound(id,(intelligence as any)?.automation_mode||null);
+      }
       await reconcileCampaignReplies();
       await syncSuppressionsToBackground();
       try{await syncEventRelay();}catch{/* delivery relay is optional and must not block mailbox sync */}
