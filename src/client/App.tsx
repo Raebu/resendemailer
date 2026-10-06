@@ -55,6 +55,8 @@ function App() {
   const [mobileSearchOpen,setMobileSearchOpen] = useState(false);
   const [translations,setTranslations] = useState<Record<string,{text:string;backTranslation:string}>>({});
   const [attachmentSummaries,setAttachmentSummaries]=useState<Record<string,{summary:string;key_points:string[];actions:string[];risks:string[];language:string}>>({});
+  const [threadAssistData,setThreadAssistData]=useState<{summary:string;status:string;language:string;suggested_replies:Array<{label:string;body:string;tone:string}>}|null>(null);
+  const [contactTimelineData,setContactTimelineData]=useState<any>(null);
   const [pendingUndo,setPendingUndo]=useState<{id:string;until:string}|null>(null);
   const draftTimer = useRef<number|null>(null);
   const mobileSearchRef = useRef<HTMLInputElement|null>(null);
@@ -91,11 +93,11 @@ function App() {
   };
   const openThread=async (m:MessageSummary)=>{
     const value=await api<ThreadDetail>(`/api/threads/${m.threadId}`);
-    setThread(value); void loadList();
+    setThreadAssistData(null);setContactTimelineData(null);setThread(value); void loadList();
   };
   const openThreadId=async(threadId:string)=>{
     const value=await api<ThreadDetail>(`/api/threads/${threadId}`);
-    setIntelligenceOpen(false);setThread(value);void loadList();
+    setIntelligenceOpen(false);setThreadAssistData(null);setContactTimelineData(null);setThread(value);void loadList();
   };
   const patch=async(id:string,body:Record<string,unknown>)=>{
     await api(`/api/messages/${id}`,{method:'PATCH',body:JSON.stringify(body)});
@@ -111,7 +113,7 @@ function App() {
 
   const defaultIdentity=identities[0]?.address || '';
   const newCompose=()=>setCompose({from:defaultIdentity,to:'',cc:'',bcc:'',subject:'',text:'',attachments:[],language:'English'});
-  const reply=(m:MessageDetail)=>{
+  const reply=(m:MessageDetail,prefill='')=>{
     const to=m.direction==='inbound'?m.fromAddress:(m.toAddresses[0]||'');
     const verifiedDomains=new Set(identities.map(i=>i.address.split('@')[1]?.toLowerCase()).filter(Boolean));
     const ownAddress=(m.direction==='inbound'
@@ -120,7 +122,7 @@ function App() {
     )||defaultIdentity;
     setCompose({
       replyToMessageId:m.id, from:ownAddress, to, cc:'', bcc:'',
-      subject:/^re:/i.test(m.subject)?m.subject:`Re: ${m.subject}`, text:'', attachments:[], language:(m.language&&m.language!=='unknown')?m.language:'English'
+      subject:/^re:/i.test(m.subject)?m.subject:`Re: ${m.subject}`, text:prefill, attachments:[], language:(m.language&&m.language!=='unknown')?m.language:'English'
     });
   };
   const openDraft=(d:Draft)=>setCompose({
@@ -180,10 +182,27 @@ function App() {
     setBusy(true);
     try{
       const result=await api<{text:string;back_translation?:string;backTranslation?:string}>('/api/language',{method:'POST',body:JSON.stringify({
-        text:source,sourceLanguage:m.language||'auto',targetLanguage:'English',mode:'translate',tone:'professional'
+        text:source,sourceLanguage:m.language||'auto',targetLanguage:'English',mode:'translate',tone:'professional',from:m.aliasAddress||undefined
       })});
       setTranslations(prev=>({...prev,[m.id]:{text:result.text,backTranslation:result.back_translation||result.backTranslation||''}}));
     }catch(e){setError(e instanceof Error?e.message:String(e));}
+    finally{setBusy(false);}
+  };
+  const loadThreadAssist=async()=>{
+    if(!thread)return;
+    setBusy(true);setError(null);
+    try{setThreadAssistData(await api<any>(`/api/threads/${encodeURIComponent(thread.id)}/assist`,{method:'POST'}));}
+    catch(e){setError(e instanceof Error?e.message:String(e));}
+    finally{setBusy(false);}
+  };
+  const loadContactTimeline=async()=>{
+    if(!thread)return;
+    const last=[...thread.messages].reverse().find(m=>m.direction==='inbound')||thread.messages.at(-1);
+    const email=last?.direction==='inbound'?last.fromAddress:last?.toAddresses?.[0];
+    if(!email)return;
+    setBusy(true);setError(null);
+    try{setContactTimelineData(await api<any>('/api/contact-timeline',{method:'POST',body:JSON.stringify({email})}));}
+    catch(e){setError(e instanceof Error?e.message:String(e));}
     finally{setBusy(false);}
   };
   const summarizeAttachment=async(id:string)=>{
@@ -345,12 +364,33 @@ function App() {
               <h2>{thread.subject||'(no subject)'}</h2>
             </div>
             <div className="threadActions">
+              <button title="Summarize thread & suggest replies" aria-label="Summarize thread" onClick={()=>void loadThreadAssist()}><MailIcon name="sparkles" size={20}/></button>
+              <button title="Contact timeline" aria-label="Contact timeline" onClick={()=>void loadContactTimeline()}><MailIcon name="mail" size={20}/></button>
               <button title="Snooze 24 hours" aria-label="Snooze 24 hours" onClick={()=>void snoozeCurrent(24)}><MailIcon name="snooze" size={20}/></button>
               <button title="Waiting for reply — remind in 3 days" aria-label="Waiting for reply" onClick={()=>void waitCurrent(3)}><MailIcon name="clock" size={20}/></button>
               <button title="Archive" aria-label="Archive" onClick={()=>void patch(thread.messages.at(-1)!.id,{isArchived:true})}><MailIcon name="archive" size={20}/></button>
               <button title="Trash" aria-label="Move to trash" onClick={()=>void patch(thread.messages.at(-1)!.id,{trash:true})}><MailIcon name="trash" size={20}/></button>
             </div>
           </div>
+          {threadAssistData&&<div className="threadAssistCard">
+            <div><b><MailIcon name="sparkles" size={16}/> Thread summary</b><span>{threadAssistData.status}</span></div>
+            <p>{threadAssistData.summary}</p>
+            {!!threadAssistData.suggested_replies?.length&&<div className="suggestedReplies">
+              {threadAssistData.suggested_replies.map((s,i)=><button key={i} onClick={()=>{
+                const target=[...thread.messages].reverse().find(m=>m.direction==='inbound')||thread.messages.at(-1);
+                if(target)reply(target,s.body);
+              }}><b>{s.label}</b><small>{s.tone}</small><span>{s.body}</span></button>)}
+            </div>}
+          </div>}
+          {contactTimelineData&&<div className="contactTimelineCard">
+            <div><b>{contactTimelineData.contact?.name||contactTimelineData.contact?.email||'Contact timeline'}</b>
+              {contactTimelineData.contact?.company&&<span>{contactTimelineData.contact.company}</span>}
+              {contactTimelineData.contact?.preferred_language&&<small>{contactTimelineData.contact.preferred_language}</small>}
+            </div>
+            <div className="contactTimelineRows">{(contactTimelineData.messages||[]).slice(0,12).map((x:any)=><button key={x.id} onClick={()=>void openThreadId(x.thread_id)}>
+              <b>{x.subject||'(no subject)'}</b><span>{x.preview||''}</span><time>{niceDate(x.created_at)}</time>
+            </button>)}</div>
+          </div>}
           <div className="threadMessages">{thread.messages.map(m=><article className="emailCard" key={m.id}>
             <div className="emailMeta">
               <div className="avatar">{initials(m.fromName||m.fromAddress)}</div>
@@ -480,12 +520,12 @@ function Compose({value,identities,busy,onChange,onClose,onSend}:{value:ComposeS
     return()=>window.clearTimeout(t);
   },[value.from]);
 
-  const transform=async(mode:'translate'|'improve'|'bilingual')=>{
+  const transform=async(mode:'translate'|'improve'|'bilingual'|'compose')=>{
     if(!value.text.trim())return;
     setAiBusy(true);
     try{
       const result=await api<{text:string;back_translation?:string;backTranslation?:string}>('/api/language',{method:'POST',body:JSON.stringify({
-        text:value.text,sourceLanguage:'auto',targetLanguage,mode,tone
+        text:value.text,sourceLanguage:'auto',targetLanguage,mode,tone,from:value.from
       })});
       onChange({...value,text:result.text,language:targetLanguage});
       setBackTranslation(result.back_translation||result.backTranslation||'');
@@ -531,6 +571,7 @@ function Compose({value,identities,busy,onChange,onClose,onSend}:{value:ComposeS
           <option value="professional">Professional</option><option value="formal">Formal</option><option value="friendly">Friendly</option>
           <option value="banking">Banking</option><option value="partnership">Partnership</option><option value="support">Support</option><option value="sales">Sales</option>
         </select>
+        <button disabled={aiBusy||!value.text.trim()} onClick={()=>void transform('compose')}><MailIcon name="sparkles" size={16}/>Write in…</button>
         <button disabled={aiBusy||!value.text.trim()} onClick={()=>void transform('translate')}><MailIcon name="language" size={16}/>Translate</button>
         <button disabled={aiBusy||!value.text.trim()} onClick={()=>void transform('improve')}><MailIcon name="sparkles" size={16}/>Improve</button>
         <button disabled={aiBusy||!value.text.trim()} onClick={()=>void transform('bilingual')}>Bilingual</button>
