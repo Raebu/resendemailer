@@ -54,7 +54,7 @@ export async function resolveOutboundAlias(addressInput:string):Promise<AliasRow
   const inherited=rows.find(a=>a.pattern&&wildcardMatch(a.pattern.includes('@')?a.pattern:`${a.pattern}@${d}`,address));
   const id=uid('alias_'),now=isoNow();
   await run(`INSERT OR IGNORE INTO aliases(id,account_id,address,pattern,persona,tone,default_language,folder,notification_priority,ai_mode,signature_id,glossary_json,forward_to_json,is_dynamic,enabled,created_at,updated_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,1,?,?)`,[
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1,1,?,?)`,[
       id,account.account_id,address,null,inherited?.persona||null,inherited?.tone||null,inherited?.default_language||'auto',
       inherited?.folder||null,inherited?.notification_priority||'normal',inherited?.ai_mode||'inherit',
       inherited?.signature_id||null,inherited?.glossary_json||'[]',inherited?.forward_to_json||'[]',now,now
