@@ -28,6 +28,15 @@ const searchSchema={type:'object',additionalProperties:false,properties:{
   },required:['threadId','reason','score']}},
 },required:['matches']};
 
+const threadAssistSchema={type:'object',additionalProperties:false,properties:{
+  summary:{type:'string'},
+  status:{type:'string'},
+  language:{type:'string'},
+  suggested_replies:{type:'array',maxItems:3,items:{type:'object',additionalProperties:false,properties:{
+    label:{type:'string'},body:{type:'string'},tone:{type:'string'},
+  },required:['label','body','tone']}},
+},required:['summary','status','language','suggested_replies']};
+
 const attachmentSummarySchema={type:'object',additionalProperties:false,properties:{
   summary:{type:'string'},
   key_points:{type:'array',maxItems:12,items:{type:'string'}},
@@ -115,6 +124,8 @@ export default {
         'You are a professional multilingual business correspondence engine.',
         'Translate or compose naturally in the requested target language while preserving meaning and tone.',
         'Never alter names, account numbers, URLs, currency values, reference numbers or quoted text when listed in preserve.',
+        'Use any supplied alias glossary consistently and do not translate glossary terms marked to stay unchanged.',
+        'If mode is compose, turn the supplied instruction or rough notes into a complete polished email in the target language without inventing facts.',
         'If mode is bilingual, return target-language text followed by the source-language equivalent.',
         'back_translation must be a faithful English rendering of the produced text for approval.',
         'Do not add claims, commitments or facts that were not in the input.',
@@ -126,6 +137,15 @@ export default {
         'Rank the supplied mailbox metadata against the natural-language search request.',
         'Return only genuinely relevant threads. Use the supplied threadId exactly.',
         'Do not infer facts not present in the items.',
+      ].join(' '),input);
+    }
+
+    if(path==='/v1/thread-assist'){
+      return structured(env,'thread_assist',threadAssistSchema,[
+        'Summarize the supplied email thread and identify its current status.',
+        'Provide up to three materially different suggested replies that are ready to edit/send.',
+        'Use only facts present in the supplied messages/contact context; never invent commitments, dates, prices, authority or relationships.',
+        'For legal, regulatory, complaints, payment disputes, security/privacy, employment, medical, fraud or contractual matters, suggestions must be conservative and require human review.',
       ].join(' '),input);
     }
 
