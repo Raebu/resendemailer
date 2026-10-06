@@ -6,7 +6,7 @@ import { configureAi, createDefaultRule, evaluateInbound, reconcileCampaignRepli
 import { pushAllReplicas, pushReplicaTarget } from './replica.js';
 import { configureBackgroundAccount, removeBackgroundAccount, configureBackgroundAutomation, setBackgroundAutomationMode, setBackgroundSuppressions, setBackgroundForegroundAudit, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
 import { analyzeInbound, attentionBriefing, composeContext, createReminder, languageTransform, markWaiting, smartSearch, snoozeThread } from './intelligence.js';
-import { cancelScheduled, flushScheduledSends, listScheduled, recordDeliveryEvent, scheduleSend } from './scheduler.js';
+import { cancelScheduled, configureEventRelay, flushScheduledSends, listScheduled, recordDeliveryEvent, scheduleSend, syncEventRelay } from './scheduler.js';
 
 let syncing=false;
 const parseBody=(init:RequestInit):any=>{
@@ -263,6 +263,7 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
       for(const id of result.newInboundIds){await analyzeInbound(id);await evaluateInbound(id);}
       await reconcileCampaignReplies();
       await syncSuppressionsToBackground();
+      try{await syncEventRelay();}catch{/* delivery relay is optional and must not block mailbox sync */}
       await flushScheduledSends();
       await flushMobileOutbox();
       await runCampaignTick();
@@ -332,6 +333,8 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
   const undoMatch=path.match(/^\/api\/scheduled\/([^/]+)\/cancel$/);
   if(undoMatch&&method==='POST')return await cancelScheduled(decodeURIComponent(undoMatch[1])) as T;
   if(path==='/api/delivery-events'&&method==='GET')return await all<any>('SELECT * FROM delivery_events ORDER BY occurred_at DESC LIMIT 300') as T;
+  if(path==='/api/event-relay/config'&&method==='POST'){await configureEventRelay(String(body.url||''),String(body.token||''));return{ok:true} as T;}
+  if(path==='/api/event-relay/sync'&&method==='POST')return await syncEventRelay() as T;
   if(path==='/api/delivery-events'&&method==='POST')return await recordDeliveryEvent(body) as T;
   if(path==='/api/intelligence/briefing'&&method==='GET')return await attentionBriefing() as T;
   if(path==='/api/intelligence/search'&&method==='POST')return await smartSearch(String(body.query||'')) as T;
