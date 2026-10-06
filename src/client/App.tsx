@@ -54,6 +54,7 @@ function App() {
   const [mobileFoldersOpen,setMobileFoldersOpen] = useState(false);
   const [mobileSearchOpen,setMobileSearchOpen] = useState(false);
   const [translations,setTranslations] = useState<Record<string,{text:string;backTranslation:string}>>({});
+  const [attachmentSummaries,setAttachmentSummaries]=useState<Record<string,{summary:string;key_points:string[];actions:string[];risks:string[];language:string}>>({});
   const [pendingUndo,setPendingUndo]=useState<{id:string;until:string}|null>(null);
   const draftTimer = useRef<number|null>(null);
   const mobileSearchRef = useRef<HTMLInputElement|null>(null);
@@ -182,6 +183,14 @@ function App() {
         text:source,sourceLanguage:m.language||'auto',targetLanguage:'English',mode:'translate',tone:'professional'
       })});
       setTranslations(prev=>({...prev,[m.id]:{text:result.text,backTranslation:result.back_translation||result.backTranslation||''}}));
+    }catch(e){setError(e instanceof Error?e.message:String(e));}
+    finally{setBusy(false);}
+  };
+  const summarizeAttachment=async(id:string)=>{
+    setBusy(true);setError(null);
+    try{
+      const result=await api<{summary:string;key_points:string[];actions:string[];risks:string[];language:string}>(`/api/attachments/${encodeURIComponent(id)}/summary`,{method:'POST'});
+      setAttachmentSummaries(prev=>({...prev,[id]:result}));
     }catch(e){setError(e instanceof Error?e.message:String(e));}
     finally{setBusy(false);}
   };
@@ -363,10 +372,24 @@ function App() {
             {translations[m.id]
               ? <div className="translatedBody"><div className="translationLabel"><MailIcon name="language" size={15}/>English translation</div>{translations[m.id].text}</div>
               : (m.htmlBody ? <iframe title={m.subject} sandbox="" srcDoc={m.htmlBody}/> : <div className="plainBody">{m.textBody||'(empty message)'}</div>)}
-            {!!m.attachments.length&&<div className="attachments">{m.attachments.map(a=><button className="attachmentButton" key={a.id} onClick={()=>void openAttachment(a.id)}>
-              <span className="attachmentIcon"><MailIcon name="attach" size={19}/></span>
-              <div><b>{a.filename}</b><small>{a.sizeBytes?formatBytes(a.sizeBytes):a.contentType}</small></div>
-            </button>)}</div>}
+            {!!m.attachments.length&&<div className="attachments">{m.attachments.map(a=><div className="attachmentItem" key={a.id}>
+              <div className="attachmentActions">
+                <button className="attachmentButton" onClick={()=>void openAttachment(a.id)}>
+                  <span className="attachmentIcon"><MailIcon name="attach" size={19}/></span>
+                  <div><b>{a.filename}</b><small>{a.sizeBytes?formatBytes(a.sizeBytes):a.contentType}</small></div>
+                </button>
+                <button className="attachmentSummaryButton" disabled={busy} onClick={()=>void summarizeAttachment(a.id)}>
+                  <MailIcon name="sparkles" size={15}/>{attachmentSummaries[a.id]?'Refresh summary':'Summarize'}
+                </button>
+              </div>
+              {attachmentSummaries[a.id]&&<div className="attachmentSummary">
+                <b>AI attachment summary</b>
+                <p>{attachmentSummaries[a.id].summary}</p>
+                {!!attachmentSummaries[a.id].key_points?.length&&<ul>{attachmentSummaries[a.id].key_points.map((x,i)=><li key={i}>{x}</li>)}</ul>}
+                {!!attachmentSummaries[a.id].actions?.length&&<div><strong>Actions</strong><ul>{attachmentSummaries[a.id].actions.map((x,i)=><li key={i}>{x}</li>)}</ul></div>}
+                {!!attachmentSummaries[a.id].risks?.length&&<div><strong>Risks / caveats</strong><ul>{attachmentSummaries[a.id].risks.map((x,i)=><li key={i}>{x}</li>)}</ul></div>}
+              </div>}
+            </div>)}</div>}
             <div className="emailActions">
               <button onClick={()=>reply(m)}><MailIcon name="reply" size={18}/>Reply</button>
               {m.direction==='inbound'&&m.language&&m.language!=='English'&&m.language!=='unknown'&&
