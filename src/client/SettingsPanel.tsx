@@ -81,10 +81,16 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
   const [aliasAccount,setAliasAccount]=useState('');
   const [aliasAddress,setAliasAddress]=useState('');
   const [aliasPattern,setAliasPattern]=useState('');
+  const [aliasDisplayName,setAliasDisplayName]=useState('');
   const [aliasPersona,setAliasPersona]=useState('');
   const [aliasTone,setAliasTone]=useState('professional');
   const [aliasLanguage,setAliasLanguage]=useState('auto');
   const [aliasSignature,setAliasSignature]=useState('');
+  const [aliasFolder,setAliasFolder]=useState('');
+  const [aliasColor,setAliasColor]=useState('#c8a96b');
+  const [aliasPriority,setAliasPriority]=useState('normal');
+  const [aliasAiMode,setAliasAiMode]=useState('inherit');
+  const [aliasForwardTo,setAliasForwardTo]=useState('');
 
   const [routeName,setRouteName]=useState('');
   const [routeConditions,setRouteConditions]=useState('{\n  "to": "bank*@gibp.global"\n}');
@@ -225,10 +231,12 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
     if(!aliasAccount||!aliasAddress.trim())throw new Error('Alias account and address are required.');
     await api('/api/aliases',{method:'POST',body:JSON.stringify({
       accountId:aliasAccount,address:aliasAddress.trim(),pattern:aliasPattern.trim()||null,
-      persona:aliasPersona.trim()||null,tone:aliasTone,defaultLanguage:aliasLanguage,
-      signatureId:aliasSignature||null,notificationPriority:'normal',aiMode:'inherit'
+      displayName:aliasDisplayName.trim()||null,persona:aliasPersona.trim()||null,tone:aliasTone,defaultLanguage:aliasLanguage,
+      signatureId:aliasSignature||null,folder:aliasFolder.trim()||null,color:aliasColor||null,
+      notificationPriority:aliasPriority,aiMode:aliasAiMode,
+      forwardTo:aliasForwardTo.split(',').map(v=>v.trim()).filter(Boolean)
     })});
-    setAliasAddress('');setAliasPattern('');setAliasPersona('');
+    setAliasAddress('');setAliasPattern('');setAliasDisplayName('');setAliasPersona('');setAliasFolder('');setAliasForwardTo('');
   });
 
   const saveRoutingRule=()=>action(async()=>{
@@ -306,24 +314,34 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
 
           <section className="settingsCard settingsWide">
             <h3><MailIcon name="sparkles" size={18}/>Alias & identity intelligence</h3>
-            <p>Exact addresses and wildcard families inherit persona, tone, language and signature. New verified-domain aliases are registered locally on first use.</p>
+            <p>Exact addresses and wildcard families can control display identity, persona, tone, language, signature, folder, colour, notification priority, forwarding and safe AI policy. New verified-domain aliases are registered locally on first use.</p>
             <div className="miniForm">
               <select className={inputClass} value={aliasAccount} onChange={e=>setAliasAccount(e.target.value)}>
                 <option value="">Resend account</option>{accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
               <input className={inputClass} value={aliasAddress} onChange={e=>setAliasAddress(e.target.value)} placeholder="banking@gibp.global"/>
               <input className={inputClass} value={aliasPattern} onChange={e=>setAliasPattern(e.target.value)} placeholder="Optional family pattern: bank-*"/>
+              <input className={inputClass} value={aliasDisplayName} onChange={e=>setAliasDisplayName(e.target.value)} placeholder="Display name: GIBP Banking"/>
               <input className={inputClass} value={aliasPersona} onChange={e=>setAliasPersona(e.target.value)} placeholder="Persona: Banking / Partnerships / Support"/>
               <select className={inputClass} value={aliasTone} onChange={e=>setAliasTone(e.target.value)}>
                 <option value="professional">Professional</option><option value="formal">Formal</option><option value="friendly">Friendly</option>
                 <option value="banking">Banking</option><option value="partnership">Partnership</option><option value="support">Support</option><option value="sales">Sales</option>
               </select>
               <select className={inputClass} value={aliasLanguage} onChange={e=>setAliasLanguage(e.target.value)}>
-                <option value="auto">Auto language</option><option>English</option><option>Nepali</option><option>Hindi</option><option>French</option><option>German</option><option>Spanish</option><option>Arabic</option><option>Chinese</option>
+                <option value="auto">Auto language</option><option>English</option><option>Nepali</option><option>Hindi</option><option>French</option><option>German</option><option>Spanish</option><option>Arabic</option><option>Chinese</option><option>Japanese</option><option>Portuguese</option><option>Italian</option><option>Dutch</option><option>Bengali</option><option>Urdu</option><option>Korean</option>
               </select>
               <select className={inputClass} value={aliasSignature} onChange={e=>setAliasSignature(e.target.value)}>
                 <option value="">No signature</option>{signatures.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
+              <input className={inputClass} value={aliasFolder} onChange={e=>setAliasFolder(e.target.value)} placeholder="Folder: Banking"/>
+              <label className="aliasColorField">Alias colour <input type="color" value={aliasColor} onChange={e=>setAliasColor(e.target.value)} aria-label="Alias colour"/></label>
+              <select className={inputClass} value={aliasPriority} onChange={e=>setAliasPriority(e.target.value)} aria-label="Notification priority">
+                <option value="low">Low notifications</option><option value="normal">Normal notifications</option><option value="high">High priority notifications</option><option value="urgent">Urgent notifications</option>
+              </select>
+              <select className={inputClass} value={aliasAiMode} onChange={e=>setAliasAiMode(e.target.value)} aria-label="Alias AI policy">
+                <option value="inherit">Inherit global AI policy</option><option value="draft">AI draft only</option><option value="auto_safe">Auto-send safe categories</option><option value="off">No autonomous reply</option>
+              </select>
+              <input className={inputClass} value={aliasForwardTo} onChange={e=>setAliasForwardTo(e.target.value)} placeholder="Forward to (optional, comma separated)"/>
               <button className="settingsPrimary" disabled={busy} onClick={()=>void saveAlias()}>Save alias / family</button>
             </div>
             <div className="settingsList">
