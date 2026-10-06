@@ -1,9 +1,9 @@
-export interface Env {
+interface EventKV {\n  list(options?:{limit?:number}):Promise<{keys:Array<{name:string}>}>;\n  put(key:string,value:string,options?:{expirationTtl?:number}):Promise<void>;\n  get<T>(key:string,type:'json'):Promise<T|null>;\n}\n\nexport interface Env {
   RESEND_WEBHOOK_SECRET: string;
   GIBP_EVENT_TOKEN: string;
   PUSH_TARGET_URL?: string;
   PUSH_TARGET_TOKEN?: string;
-  EVENTS?: KVNamespace;
+  EVENTS?: EventKV;
 }
 
 type MinimalEvent={
