@@ -5,7 +5,7 @@ import { accountForSender, flushMobileOutbox, refreshDomains, queueAndSend, sync
 import { configureAi, createDefaultRule, evaluateInbound, reconcileCampaignReplies, runCampaignTick } from './automation.js';
 import { pushAllReplicas, pushReplicaTarget } from './replica.js';
 import { configureBackgroundAccount, removeBackgroundAccount, configureBackgroundAutomation, setBackgroundAutomationMode, setBackgroundSuppressions, setBackgroundForegroundAudit, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
-import { analyzeInbound, attentionBriefing, composeContext, createReminder, languageTransform, markWaiting, smartSearch, snoozeThread, summarizeAttachment } from './intelligence.js';
+import { analyzeInbound, attentionBriefing, composeContext, contactTimeline, createReminder, languageTransform, markWaiting, smartSearch, snoozeThread, summarizeAttachment, threadAssist } from './intelligence.js';
 import { cancelScheduled, configureEventRelay, flushScheduledSends, listScheduled, recordDeliveryEvent, scheduleSend, syncEventRelay } from './scheduler.js';
 
 let syncing=false;
@@ -339,6 +339,9 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
   if(path==='/api/event-relay/config'&&method==='POST'){await configureEventRelay(String(body.url||''),String(body.token||''));return{ok:true} as T;}
   if(path==='/api/event-relay/sync'&&method==='POST')return await syncEventRelay() as T;
   if(path==='/api/delivery-events'&&method==='POST')return await recordDeliveryEvent(body) as T;
+  const threadAssistMatch=path.match(/^\/api\/threads\/([^/]+)\/assist$/);
+  if(threadAssistMatch&&method==='POST')return await threadAssist(decodeURIComponent(threadAssistMatch[1])) as T;
+  if(path==='/api/contact-timeline'&&method==='POST')return await contactTimeline(String(body.email||'')) as T;
   if(path==='/api/intelligence/briefing'&&method==='GET')return await attentionBriefing() as T;
   if(path==='/api/intelligence/search'&&method==='POST')return await smartSearch(String(body.query||'')) as T;
   const attachmentSummaryMatch=path.match(/^\/api\/attachments\/([^/]+)\/summary$/);
@@ -346,6 +349,7 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
   if(path==='/api/language'&&method==='POST')return await languageTransform({
     text:String(body.text||''),sourceLanguage:body.sourceLanguage?String(body.sourceLanguage):undefined,
     targetLanguage:String(body.targetLanguage||'English'),mode:body.mode?String(body.mode):undefined,tone:body.tone?String(body.tone):undefined,
+    from:body.from?String(body.from):undefined,
   }) as T;
   if(path==='/api/reminders'&&method==='GET')return await all<any>("SELECT * FROM reminders WHERE state='pending' ORDER BY due_at") as T;
   if(path==='/api/reminders'&&method==='POST')return {id:await createReminder(String(body.threadId),body.messageId?String(body.messageId):null,String(body.kind||'follow_up'),String(body.dueAt),String(body.note||''))} as T;
@@ -360,10 +364,10 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
   if(path==='/api/aliases'&&method==='GET')return await all<any>('SELECT * FROM aliases WHERE enabled=1 ORDER BY address') as T;
   if(path==='/api/aliases'&&method==='POST'){
     const now=isoNow(),id=body.id||uid('alias_');
-    await run(`INSERT INTO aliases(id,account_id,address,pattern,display_name,signature_id,persona,tone,default_language,folder,color,notification_priority,ai_mode,forward_to_json,is_dynamic,enabled,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(address) DO UPDATE SET pattern=excluded.pattern,display_name=excluded.display_name,signature_id=excluded.signature_id,persona=excluded.persona,tone=excluded.tone,default_language=excluded.default_language,folder=excluded.folder,color=excluded.color,notification_priority=excluded.notification_priority,ai_mode=excluded.ai_mode,forward_to_json=excluded.forward_to_json,updated_at=excluded.updated_at`,
-      [id,String(body.accountId),String(body.address).toLowerCase(),body.pattern||null,body.displayName||null,body.signatureId||null,body.persona||null,body.tone||null,body.defaultLanguage||'auto',body.folder||null,body.color||null,body.notificationPriority||'normal',body.aiMode||'inherit',JSON.stringify(body.forwardTo||[]),body.isDynamic?1:0,1,now,now]);
+    await run(`INSERT INTO aliases(id,account_id,address,pattern,display_name,signature_id,persona,tone,default_language,folder,color,notification_priority,ai_mode,glossary_json,forward_to_json,is_dynamic,enabled,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(address) DO UPDATE SET pattern=excluded.pattern,display_name=excluded.display_name,signature_id=excluded.signature_id,persona=excluded.persona,tone=excluded.tone,default_language=excluded.default_language,folder=excluded.folder,color=excluded.color,notification_priority=excluded.notification_priority,ai_mode=excluded.ai_mode,glossary_json=excluded.glossary_json,forward_to_json=excluded.forward_to_json,updated_at=excluded.updated_at`,
+      [id,String(body.accountId),String(body.address).toLowerCase(),body.pattern||null,body.displayName||null,body.signatureId||null,body.persona||null,body.tone||null,body.defaultLanguage||'auto',body.folder||null,body.color||null,body.notificationPriority||'normal',body.aiMode||'inherit',JSON.stringify(body.glossary||[]),JSON.stringify(body.forwardTo||[]),body.isDynamic?1:0,1,now,now]);
     return{id} as T;
   }
 
