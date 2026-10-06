@@ -49,10 +49,17 @@ async function listMessages(url:URL):Promise<any[]>{
   const params:any[]=[];
   if(q){where+=" AND (lower(m.subject) LIKE ? OR lower(m.from_address) LIKE ? OR lower(coalesce(m.text_body,'')) LIKE ?)";params.push(`%${q}%`,`%${q}%`,`%${q}%`);}
   const rows=await all<any>(`
-    SELECT m.*,
+    SELECT m.*,mi.category,mi.priority,mi.needs_reply,mi.needs_me,mi.waiting,mi.language,mi.why_it_matters,
+      mi.summary intelligence_summary,mi.labels_json,al.address alias_address,sz.until_at snoozed_until,
       (SELECT count(*) FROM attachments a WHERE a.message_id=m.id) attachment_count,
       (SELECT count(*) FROM messages x WHERE x.thread_id=m.thread_id AND x.deleted_at IS NULL) thread_count
-    FROM messages m WHERE ${where} ORDER BY m.created_at DESC LIMIT 200
+    FROM messages m
+    LEFT JOIN message_intelligence mi ON mi.message_id=m.id
+    LEFT JOIN aliases al ON al.id=mi.alias_id
+    LEFT JOIN snoozes sz ON sz.thread_id=m.thread_id
+    WHERE ${where} ORDER BY
+      CASE coalesce(mi.priority,'normal') WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+      m.created_at DESC LIMIT 200
   `,params);
   const seen=new Set<string>();
   return rows.filter(r=>folder==='outbox'||(!seen.has(r.thread_id)&&!!seen.add(r.thread_id))).map(toSummary);
@@ -259,9 +266,15 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     const thread=await one<any>('SELECT * FROM threads WHERE id=?',[id]);
     if(!thread)throw new Error('Thread not found');
     const rows=await all<any>(`
-      SELECT m.*,(SELECT count(*) FROM attachments a WHERE a.message_id=m.id) attachment_count,
+      SELECT m.*,mi.category,mi.priority,mi.needs_reply,mi.needs_me,mi.waiting,mi.language,mi.why_it_matters,
+      mi.summary intelligence_summary,mi.labels_json,al.address alias_address,sz.until_at snoozed_until,
+      (SELECT count(*) FROM attachments a WHERE a.message_id=m.id) attachment_count,
       (SELECT count(*) FROM messages x WHERE x.thread_id=m.thread_id AND x.deleted_at IS NULL) thread_count
-      FROM messages m WHERE m.thread_id=? AND m.deleted_at IS NULL ORDER BY m.created_at`,[id]);
+      FROM messages m
+      LEFT JOIN message_intelligence mi ON mi.message_id=m.id
+      LEFT JOIN aliases al ON al.id=mi.alias_id
+      LEFT JOIN snoozes sz ON sz.thread_id=m.thread_id
+      WHERE m.thread_id=? AND m.deleted_at IS NULL ORDER BY m.created_at`,[id]);
     for(const row of rows.filter(x=>!x.is_read)){
       await run('UPDATE messages SET is_read=1,revision=? WHERE id=?',[await nextRevision(),row.id]);
     }
