@@ -164,7 +164,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .settingsGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;padding:16px}
 .settingsCard{border:1px solid #222b37;background:#111720;border-radius:16px;padding:17px;display:flex;flex-direction:column;gap:10px}
 .settingsCard.settingsWide{grid-column:1/-1}
-.settingsCard h3{font-size:14px;margin:0}
+.settingsCard h3{font-size:14px;margin:0;display:flex;align-items:center;gap:8px}.settingsCard h3 svg{color:#d7b75e;flex:0 0 auto}
 .settingsCard>p{font-size:11px;line-height:1.55;color:#7f8a9b;margin:0 0 3px}
 .settingsInput{width:100%;min-height:44px;border:1px solid #2c3644;background:#0c1118;color:#e2e7ee;border-radius:11px;padding:10px 12px;font-size:12px;outline:none;resize:vertical}
 .settingsInput:focus{border-color:#9a8040}
