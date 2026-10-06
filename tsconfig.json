@@ -26,6 +26,7 @@
   "include": [
     "src",
     "workers/ai-gateway/src",
+    "workers/event-relay/src",
     "vite.config.ts"
   ]
 }
