@@ -31,47 +31,41 @@ The repository already contains and CI-validates:
 
 Do not replace this architecture simply to make setup easier.
 
-## First local action: create the npm lockfile
+## Dependency state
 
-The repository intentionally pins direct dependency versions, but a full `package-lock.json` could not be generated in the pre-handoff environment because that environment had no access to the npm registry.
+Both dependency graphs are already locked:
 
-On the Codex/local machine:
+- root application: `package-lock.json`
+- AI gateway: `workers/ai-gateway/package-lock.json`
 
-```bash
-npm install
-```
+Direct root dependencies are also pinned to exact versions.
 
-This should create `package-lock.json`.
-
-Then rerun:
-
-```bash
-npm run check
-```
-
-If green, commit the lockfile. From that point onward prefer `npm ci` in deterministic environments.
-
-Do not change dependency versions merely because newer versions exist unless a real build/runtime problem requires it.
+Do not regenerate or upgrade these merely because newer packages exist. Change dependency versions only to solve a demonstrated build, security or runtime issue.
 
 ## One-command preflight
 
-After dependencies are installed:
+From a fresh clone:
 
 ```bash
 npm run preflight
 ```
 
+The preflight command performs deterministic `npm ci` installs itself.
+
 This performs:
 
-1. TypeScript validation
-2. unit/regression tests
-3. production Vite build
-4. key-shaped secret scan
-5. Capacitor Android generation/sync
-6. native overlay application
-7. clean Gradle `assembleDebug`
-8. APK existence validation
-9. SHA-256 generation
+1. deterministic root `npm ci`
+2. TypeScript validation
+3. unit/regression tests
+4. production Vite build
+5. key-shaped secret scan
+6. deterministic AI-gateway `npm ci`
+7. Wrangler `deploy --dry-run` bundle validation
+8. Capacitor Android generation/sync
+9. native overlay application
+10. clean Gradle `assembleDebug`
+11. APK existence validation
+12. SHA-256 generation
 
 Expected APK:
 
@@ -193,7 +187,7 @@ Required secrets:
 
 ```bash
 cd workers/ai-gateway
-npm install
+npm ci
 npx wrangler secret put OPENAI_API_KEY
 npx wrangler secret put GIBP_AI_GATEWAY_TOKEN
 npx wrangler deploy
