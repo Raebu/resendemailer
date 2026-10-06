@@ -1,5 +1,8 @@
 # GIBP Mail
 
+> **Device handoff:** before doing live Android installation/configuration, use [`docs/CODEX_HANDOFF.md`](docs/CODEX_HANDOFF.md). After `npm install`, `npm run preflight` now performs the full local validation/build/checksum pass, and `npm run android:install` installs and smoke-tests the resulting APK over ADB.
+
+
 GIBP Mail is a **phone-primary, local-first email client for Resend**.
 
 The Android phone is the authoritative mailbox. Resend provides email transport and temporary recovery; the phone stores the durable encrypted mailbox and attachments. A Linux PC can receive an encrypted-network replica whenever it is online, but the PC never needs to run 24/7.
