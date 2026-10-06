@@ -6,6 +6,7 @@ import { configureAi, createDefaultRule, evaluateInbound, reconcileCampaignRepli
 import { pushAllReplicas, pushReplicaTarget } from './replica.js';
 import { configureBackgroundAccount, removeBackgroundAccount, configureBackgroundAutomation, setBackgroundAutomationMode, setBackgroundSuppressions, setBackgroundForegroundAudit, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
 import { analyzeInbound, attentionBriefing, createReminder, languageTransform, markWaiting, smartSearch, snoozeThread } from './intelligence.js';
+import { cancelScheduled, flushScheduledSends, listScheduled, recordDeliveryEvent, scheduleSend } from './scheduler.js';
 
 let syncing=false;
 const parseBody=(init:RequestInit):any=>{
@@ -251,6 +252,7 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
       for(const id of result.newInboundIds){await analyzeInbound(id);await evaluateInbound(id);}
       await reconcileCampaignReplies();
       await syncSuppressionsToBackground();
+      await flushScheduledSends();
       await flushMobileOutbox();
       await runCampaignTick();
       await syncSuppressionsToBackground();
@@ -306,7 +308,18 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     return{id} as T;
   }
   if(path.startsWith('/api/drafts/')&&method==='DELETE'){await run('DELETE FROM drafts WHERE id=?',[decodeURIComponent(path.split('/').pop()!)]);return{ok:true} as T;}
-  if(path==='/api/send'&&method==='POST')return await queueAndSend(body) as T;
+  if(path==='/api/send'&&method==='POST'){
+    const undo=Math.max(0,Math.min(30,Number(body.undoSeconds||0)));
+    const scheduledAt=body.scheduledAt?String(body.scheduledAt):null;
+    if(undo>0||scheduledAt)return await scheduleSend(body,scheduledAt||new Date().toISOString(),undo) as T;
+    return await queueAndSend(body) as T;
+  }
+  if(path==='/api/scheduled'&&method==='GET')return await listScheduled() as T;
+  if(path==='/api/scheduled'&&method==='POST')return await scheduleSend(body.payload||body,String(body.scheduledAt),Number(body.undoSeconds||0)) as T;
+  const undoMatch=path.match(/^\/api\/scheduled\/([^/]+)\/cancel$/);
+  if(undoMatch&&method==='POST')return await cancelScheduled(decodeURIComponent(undoMatch[1])) as T;
+  if(path==='/api/delivery-events'&&method==='GET')return await all<any>('SELECT * FROM delivery_events ORDER BY occurred_at DESC LIMIT 300') as T;
+  if(path==='/api/delivery-events'&&method==='POST')return await recordDeliveryEvent(body) as T;
   if(path==='/api/intelligence/briefing'&&method==='GET')return await attentionBriefing() as T;
   if(path==='/api/intelligence/search'&&method==='POST')return await smartSearch(String(body.query||'')) as T;
   if(path==='/api/language'&&method==='POST')return await languageTransform({
