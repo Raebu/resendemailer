@@ -1,4 +1,5 @@
 import { CapacitorHttp } from '@capacitor/core';
+import { Filesystem } from '@capacitor/filesystem';
 import { all, isoNow, json, one, run, uid } from './db.js';
 import { queueAndSend } from './sync.js';
 import { emailDomain, routingRuleMatches, wildcardMatch } from '../shared/intelligence.js';
@@ -110,6 +111,22 @@ export async function analyzeInbound(messageId:string){
 export async function createReminder(threadId:string,messageId:string|null,kind:string,dueAt:string,note=''){const id=uid('rem_'),now=isoNow();await run('INSERT INTO reminders(id,thread_id,message_id,kind,due_at,state,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',[id,threadId,messageId,kind,dueAt,'pending',note,now,now]);return id;}
 export async function snoozeThread(threadId:string,untilAt:string){const now=isoNow();await run(`INSERT INTO snoozes(thread_id,until_at,created_at,updated_at) VALUES(?,?,?,?) ON CONFLICT(thread_id) DO UPDATE SET until_at=excluded.until_at,updated_at=excluded.updated_at`,[threadId,untilAt,now,now]);}
 export async function markWaiting(threadId:string,messageId:string|null,dueAt?:string){await run('UPDATE message_intelligence SET waiting=1 WHERE message_id IN (SELECT id FROM messages WHERE thread_id=?)',[threadId]);if(dueAt)await createReminder(threadId,messageId,'waiting_reply',dueAt,'Waiting for reply');}
+
+export async function summarizeAttachment(attachmentId:string){
+  const attachment=await one<any>('SELECT * FROM attachments WHERE id=?',[attachmentId]);
+  if(!attachment)throw new Error('Attachment not found');
+  if(!attachment.local_path)throw new Error('Attachment is not downloaded to this device');
+  const size=Number(attachment.size_bytes||0);
+  if(size>8*1024*1024)throw new Error('Attachment summaries are limited to 8 MiB per file');
+  const file=await Filesystem.readFile({path:attachment.local_path});
+  if(typeof file.data!=='string')throw new Error('Attachment could not be read as local data');
+  if(file.data.length>12_000_000)throw new Error('Attachment is too large to summarize safely');
+  return ai('/v1/attachment-summary',{
+    filename:String(attachment.filename||'attachment'),
+    content_type:String(attachment.content_type||'application/octet-stream'),
+    file_data:file.data,
+  });
+}
 
 export async function languageTransform(input:{text:string;sourceLanguage?:string;targetLanguage:string;mode?:string;tone?:string}){
   return ai('/v1/language',{text:input.text,source_language:input.sourceLanguage||'auto',target_language:input.targetLanguage,mode:input.mode||'translate',tone:input.tone||'professional',preserve:['names','account numbers','URLs','currency values','reference numbers','quoted text']});
