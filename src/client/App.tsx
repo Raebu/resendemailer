@@ -10,7 +10,7 @@ type Draft = {
 };
 type ComposeState = {
   id?:string; replyToMessageId?:string|null; from:string; to:string; cc:string; bcc:string;
-  subject:string; text:string; attachments:File[];
+  subject:string; text:string; attachments:File[]; language?:string;
 };
 
 const folders: {id:Folder; label:string; icon:MailIconName}[] = [
@@ -102,7 +102,7 @@ function App() {
   };
 
   const defaultIdentity=identities[0]?.address || '';
-  const newCompose=()=>setCompose({from:defaultIdentity,to:'',cc:'',bcc:'',subject:'',text:'',attachments:[]});
+  const newCompose=()=>setCompose({from:defaultIdentity,to:'',cc:'',bcc:'',subject:'',text:'',attachments:[],language:'English'});
   const reply=(m:MessageDetail)=>{
     const to=m.direction==='inbound'?m.fromAddress:(m.toAddresses[0]||'');
     const verifiedDomains=new Set(identities.map(i=>i.address.split('@')[1]?.toLowerCase()).filter(Boolean));
@@ -112,12 +112,12 @@ function App() {
     )||defaultIdentity;
     setCompose({
       replyToMessageId:m.id, from:ownAddress, to, cc:'', bcc:'',
-      subject:/^re:/i.test(m.subject)?m.subject:`Re: ${m.subject}`, text:'', attachments:[]
+      subject:/^re:/i.test(m.subject)?m.subject:`Re: ${m.subject}`, text:'', attachments:[], language:(m.language&&m.language!=='unknown')?m.language:'English'
     });
   };
   const openDraft=(d:Draft)=>setCompose({
     id:d.id, replyToMessageId:d.replyToMessageId, from:d.fromIdentity, to:d.to.join(', '),
-    cc:d.cc.join(', '),bcc:d.bcc.join(', '),subject:d.subject,text:d.textBody,attachments:[]
+    cc:d.cc.join(', '),bcc:d.bcc.join(', '),subject:d.subject,text:d.textBody,attachments:[],language:'English'
   });
 
   const persistDraft=useCallback(async(c:ComposeState)=>{
@@ -395,7 +395,7 @@ function App() {
       </section>
     </div>}
 
-    {compose&&<Compose value={compose} identities={identities} busy={busy} onChange={setCompose} onClose={()=>setCompose(null)} onSend={()=>void send()}/>}
+    {compose&&<Compose value={compose} identities={identities} busy={busy} onChange={setCompose} onClose={()=>setCompose(null)} onSend={options=>void send(options)}/>}
     {settingsOpen&&<SettingsPanel onClose={()=>setSettingsOpen(false)} onChanged={()=>void Promise.all([api<Identity[]>('/api/identities').then(setIdentities),refreshStatus(),loadList()])} onError={setError}/>}
   </div>
 }
