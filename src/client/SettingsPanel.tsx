@@ -211,6 +211,40 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
     setCampaignContacts('');
   });
 
+  const saveAlias=()=>action(async()=>{
+    if(!aliasAccount||!aliasAddress.trim())throw new Error('Alias account and address are required.');
+    await api('/api/aliases',{method:'POST',body:JSON.stringify({
+      accountId:aliasAccount,address:aliasAddress.trim(),pattern:aliasPattern.trim()||null,
+      persona:aliasPersona.trim()||null,tone:aliasTone,defaultLanguage:aliasLanguage,
+      signatureId:aliasSignature||null,notificationPriority:'normal',aiMode:'inherit'
+    })});
+    setAliasAddress('');setAliasPattern('');setAliasPersona('');
+  });
+
+  const saveRoutingRule=()=>action(async()=>{
+    if(!routeName.trim())throw new Error('Routing rule name is required.');
+    let conditions:any,actions:any;
+    try{conditions=JSON.parse(routeConditions);actions=JSON.parse(routeActions);}catch{throw new Error('Routing conditions/actions must be valid JSON.');}
+    await api('/api/routing-rules',{method:'POST',body:JSON.stringify({
+      name:routeName.trim(),priority:100,conditions,actions,stopProcessing:false
+    })});
+    setRouteName('');
+  });
+
+  const saveSignature=()=>action(async()=>{
+    if(!signatureName.trim())throw new Error('Signature name is required.');
+    await api('/api/signatures',{method:'POST',body:JSON.stringify({name:signatureName.trim(),textBody:signatureBody})});
+    setSignatureName('');setSignatureBody('');
+  });
+
+  const saveTemplate=()=>action(async()=>{
+    if(!templateName.trim())throw new Error('Template name is required.');
+    await api('/api/templates',{method:'POST',body:JSON.stringify({
+      name:templateName.trim(),subject:templateSubject,textBody:templateBody,language:templateLanguage||null
+    })});
+    setTemplateName('');setTemplateSubject('');setTemplateBody('');setTemplateLanguage('');
+  });
+
   return <div className="settingsBackdrop" onMouseDown={e => {
     if (e.target === e.currentTarget) onClose();
   }}>
