@@ -263,9 +263,15 @@ function App() {
                 <strong>{m.subject||'(no subject)'} {m.threadCount>1&&<i>{m.threadCount}</i>}</strong>
                 <p>{m.preview||'No preview'}</p>
                 <div className="rowMeta">
+                  {m.priority&&m.priority!=='normal'&&<span className={`intelBadge priority-${m.priority}`}><MailIcon name="priority" size={12}/>{m.priority}</span>}
+                  {m.aliasAddress&&<span className="intelBadge">{m.aliasAddress}</span>}
+                  {m.language&&m.language!=='unknown'&&<span className="intelBadge"><MailIcon name="language" size={12}/>{m.language}</span>}
+                  {m.needsMe&&<span className="intelBadge needsMe">Needs me</span>}
+                  {m.waiting&&<span className="intelBadge waiting">Waiting</span>}
                   {m.attachmentCount>0&&<span><MailIcon name="attach" size={14}/>{m.attachmentCount}</span>}
                   {m.status==='queued'&&<span className="queued">Queued</span>}
                 </div>
+                {m.whyItMatters&&<p className="whyItMatters">{m.whyItMatters}</p>}
               </div>
               <button
                 className={`starButton ${m.isStarred?'on':''}`}
