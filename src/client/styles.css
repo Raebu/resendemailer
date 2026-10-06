@@ -411,3 +411,13 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   .assistantSection{padding:15px 12px}.assistantSection h3{font-size:14px}.briefingSummary{font-size:13px}
   .assistantResults b,.reminderRow b{font-size:13px}.assistantResults small,.reminderRow small{font-size:11px}
 }
+
+
+.undoSnackbar{position:fixed;z-index:80;left:50%;bottom:calc(88px + env(safe-area-inset-bottom));transform:translateX(-50%);min-width:280px;max-width:calc(100vw - 28px);height:52px;background:#eef2f7;color:#161b22;border-radius:14px;box-shadow:0 14px 50px rgba(0,0,0,.42);display:flex;align-items:center;justify-content:space-between;gap:18px;padding:0 10px 0 16px;font-size:13px;font-weight:600}
+.undoSnackbar button{border:0;background:transparent;color:#8a6818;font-weight:900;min-width:66px;height:40px;border-radius:10px;cursor:pointer}
+.undoSnackbar button:hover{background:#e4e8ee}
+.deliveryBadge{display:inline-flex!important;align-items:center;gap:4px;border-radius:999px;padding:2px 7px;font-size:9px!important;text-transform:capitalize}
+.deliveryBadge.delivered{color:#79d9a9;background:#153326}
+.deliveryBadge.delayed{color:#e9c36f;background:#352c18}
+.deliveryBadge.bounced,.deliveryBadge.complained,.deliveryBadge.failed{color:#f08f92;background:#35191c}
+@media(max-width:820px){.undoSnackbar{left:14px;right:14px;bottom:calc(84px + env(safe-area-inset-bottom));transform:none;max-width:none}.deliveryBadge{font-size:10px!important}}
