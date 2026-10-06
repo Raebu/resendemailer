@@ -1,0 +1,138 @@
+name: Deploy GIBP Mail Workers
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "workers/ai-gateway/**"
+      - "workers/event-relay/**"
+      - ".github/workflows/deploy-workers.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gibp-mail-workers-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-ai-gateway:
+    name: Deploy AI gateway
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Validate required secrets
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GIBP_AI_GATEWAY_TOKEN: ${{ secrets.GIBP_AI_GATEWAY_TOKEN }}
+        run: |
+          set -euo pipefail
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID OPENAI_API_KEY GIBP_AI_GATEWAY_TOKEN; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required repository secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Install Worker dependencies
+        working-directory: workers/ai-gateway
+        run: npm ci
+
+      - name: Deploy AI gateway
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/ai-gateway
+          secrets: |
+            OPENAI_API_KEY
+            GIBP_AI_GATEWAY_TOKEN
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GIBP_AI_GATEWAY_TOKEN: ${{ secrets.GIBP_AI_GATEWAY_TOKEN }}
+
+  deploy-event-relay:
+    name: Deploy event relay
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Validate required secrets
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
+          GIBP_EVENT_TOKEN: ${{ secrets.GIBP_EVENT_TOKEN }}
+        run: |
+          set -euo pipefail
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID RESEND_WEBHOOK_SECRET GIBP_EVENT_TOKEN; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required repository secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Install Wrangler
+        working-directory: workers/ai-gateway
+        run: npm ci
+
+      - name: Ensure production KV namespace exists
+        id: kv
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          WRANGLER="./workers/ai-gateway/node_modules/.bin/wrangler"
+          TITLE="gibp-mail-events"
+          ID="$("$WRANGLER" kv namespace list --json | jq -r --arg title "$TITLE" '.[] | select(.title == $title) | .id' | head -n1)"
+          if [[ -z "$ID" ]]; then
+            OUTPUT="$("$WRANGLER" kv namespace create "$TITLE")"
+            ID="$(printf '%s\n' "$OUTPUT" | sed -n 's/.*id = "\([^"]*\)".*/\1/p' | head -n1)"
+          fi
+          if [[ -z "$ID" ]]; then
+            echo "::error::Unable to resolve/create Cloudflare KV namespace."
+            exit 1
+          fi
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Bind KV namespace
+        shell: bash
+        working-directory: workers/event-relay
+        env:
+          EVENTS_KV_ID: ${{ steps.kv.outputs.id }}
+        run: |
+          cat >> wrangler.toml <<EOF
+
+          [[kv_namespaces]]
+          binding = "EVENTS"
+          id = "${EVENTS_KV_ID}"
+          EOF
+
+      - name: Deploy event relay
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/event-relay
+          secrets: |
+            RESEND_WEBHOOK_SECRET
+            GIBP_EVENT_TOKEN
+        env:
+          RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
+          GIBP_EVENT_TOKEN: ${{ secrets.GIBP_EVENT_TOKEN }}
