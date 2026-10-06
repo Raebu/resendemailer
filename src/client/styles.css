@@ -329,3 +329,58 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   .listPane.withThread{width:43%;min-width:330px}
   .threadMessages{padding-left:18px;padding-right:18px}
 }
+
+
+/* Intelligence, multilingual and scheduling layer */
+.intelBadge{display:inline-flex!important;align-items:center;gap:3px;border:1px solid #2d3745;background:#151c25;color:#93a0b1;border-radius:999px;padding:2px 7px;font-size:9px!important;text-transform:none}
+.intelBadge.priority-urgent,.priority-urgent{color:#ff9a9c!important;border-color:#593136!important;background:#29171a!important}
+.intelBadge.priority-high,.priority-high{color:#f2c975!important;border-color:#5a4928!important;background:#282112!important}
+.intelBadge.needsMe{color:#8fc7ff;border-color:#2b4a66;background:#12202d}
+.intelBadge.waiting{color:#b8a7ff;border-color:#473c68;background:#1b1728}
+.whyItMatters{margin-top:7px!important;color:#a8b4c5!important;font-size:11px!important;font-style:italic}
+.intelligenceStrip{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:10px 18px;background:#111923;border-bottom:1px solid #202936;color:#aeb9c8;font-size:11px;line-height:1.45}
+.intelligenceStrip>span{display:flex;align-items:flex-start;gap:7px;min-width:0}
+.intelligenceStrip>span svg{color:#d8b85d;flex:0 0 auto;margin-top:1px}
+.intelligenceStrip>div{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+.intelligenceStrip b{font-size:9px;font-weight:700;border:1px solid #303a48;background:#171e27;border-radius:999px;padding:3px 6px;color:#8f9bad;white-space:nowrap}
+.translatedBody{padding:26px 20px 30px;color:#dce3ec;font-size:15px;line-height:1.72;white-space:pre-wrap;background:#0f151d}
+.translationLabel{display:flex;align-items:center;gap:6px;color:#d7b75e;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+.emailActions{display:flex;flex-wrap:wrap;gap:8px}
+.personaBar{min-height:34px;display:flex;align-items:center;gap:7px;padding:6px 15px;background:#151c25;border-bottom:1px solid #252e3a;color:#aeb8c7;font-size:10px;overflow:auto}
+.personaBar svg{color:#ddb95e;flex:0 0 auto}.personaBar span,.personaBar b,.personaBar em,.personaBar small{white-space:nowrap}
+.personaBar b{color:#ead18a}.personaBar em{font-style:normal;color:#8ea0b5}.personaBar small{margin-left:auto;color:#6f7c8f}
+.composeAiBar{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid #202833;background:#0f151c;overflow-x:auto}
+.composeAiBar select,.composeAiBar button,.templateBar button,.scheduleBar button,.scheduleBar input,.scheduleBar select{height:34px;border:1px solid #303a48;background:#171e27;color:#cdd5df;border-radius:9px;padding:0 9px;font-size:10px;white-space:nowrap}
+.composeAiBar button,.templateBar button,.scheduleBar button{cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.composeAiBar button:hover,.templateBar button:hover,.scheduleBar button:hover{background:#1d2631}.composeAiBar button:disabled{opacity:.45}
+.templateBar{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid #202833;overflow-x:auto;background:#10161e}
+.templateBar>span{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:#687588;margin-right:2px}
+.backTranslation{max-height:130px;overflow:auto;padding:10px 14px;background:#161e27;border-top:1px solid #283241;color:#aeb9c7;font-size:11px;line-height:1.5}
+.backTranslation b,.backTranslation span{display:block}.backTranslation b{color:#d8b85e;font-size:9px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
+.scheduleBar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 12px;background:#171e27;border-top:1px solid #283241;color:#8f9bad;font-size:10px}
+.scheduleBar label{display:flex;align-items:center;gap:6px}.scheduleBar input{color-scheme:dark}.scheduleBar button{background:#cfad55;color:#171307;border-color:#cfad55;font-weight:800}
+.undoSetting{color:#7d8999;font-size:10px;white-space:nowrap}
+.intelligenceSettingsGrid{display:grid;gap:10px}.miniForm{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.miniForm .wide{grid-column:1/-1}
+.ruleSummary{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9px;color:#8390a2;white-space:pre-wrap;word-break:break-word}
+
+@media(max-width:820px){
+  .whyItMatters{font-size:12px!important;margin-top:6px!important}
+  .intelBadge{font-size:10px!important;padding:3px 7px}
+  .intelligenceStrip{padding:10px 14px;display:block}
+  .intelligenceStrip>div{justify-content:flex-start;margin-top:8px}
+  .translatedBody{padding:24px 17px 30px;font-size:16px}
+  .personaBar{padding:7px 13px;font-size:11px}
+  .personaBar small{display:none}
+  .composeAiBar{padding:8px 9px;scrollbar-width:none}
+  .composeAiBar::-webkit-scrollbar,.templateBar::-webkit-scrollbar{display:none}
+  .composeAiBar select,.composeAiBar button,.templateBar button{height:38px;font-size:11px;border-radius:11px}
+  .templateBar{padding:8px 9px}
+  .backTranslation{max-height:150px;font-size:12px}
+  .scheduleBar{padding:10px 12px}
+  .scheduleBar label{width:100%;justify-content:space-between;font-size:12px}
+  .scheduleBar input,.scheduleBar select,.scheduleBar button{height:40px;font-size:12px}
+  .scheduleBar input{flex:1}
+  .undoSetting{font-size:10px}
+  .miniForm{grid-template-columns:1fr}
+  .miniForm .wide{grid-column:auto}
+}
