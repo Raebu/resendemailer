@@ -3,7 +3,7 @@ import type { ReactNode, SVGProps } from 'react';
 export type MailIconName =
   | 'menu' | 'search' | 'settings' | 'sync' | 'inbox' | 'star' | 'send'
   | 'draft' | 'clock' | 'archive' | 'trash' | 'compose' | 'back' | 'attach'
-  | 'reply' | 'more' | 'close' | 'mail' | 'check';
+  | 'reply' | 'more' | 'close' | 'mail' | 'check' | 'sparkles' | 'language' | 'mic' | 'snooze' | 'priority';
 
 const paths:Record<MailIconName,ReactNode>={
   menu:<><path d="M4 6h16M4 12h16M4 18h16"/></>,
@@ -25,6 +25,11 @@ const paths:Record<MailIconName,ReactNode>={
   close:<><path d="m6 6 12 12M18 6 6 18"/></>,
   mail:<><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></>,
   check:<><path d="m5 12 4 4L19 6"/></>,
+  sparkles:<><path d="m12 3 1.3 3.7L17 8l-3.7 1.3L12 13l-1.3-3.7L7 8l3.7-1.3L12 3Z"/><path d="m18 14 .9 2.1L21 17l-2.1.9L18 20l-.9-2.1L15 17l2.1-.9L18 14Z"/></>,
+  language:<><path d="M4 5h9M8.5 3v2M6 5c.6 3 2.4 5.2 5 6.5M11 5c-.6 3-2.4 5.2-5 6.5"/><path d="m14 20 3.5-9 3.5 9M15.2 17h4.6"/></>,
+  mic:<><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></>,
+  snooze:<><circle cx="12" cy="13" r="8"/><path d="M12 9v5l3 2M7 3 4 6M17 3l3 3"/></>,
+  priority:<><path d="M12 3v12"/><circle cx="12" cy="20" r="1"/></>,
 };
 
 export function MailIcon({name,size=22,className,...props}:{name:MailIconName;size?:number;className?:string}&Omit<SVGProps<SVGSVGElement>,'name'>){
