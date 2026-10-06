@@ -4,7 +4,7 @@ import { all, isoNow, json, one, run, uid } from './db.js';
 import { queueAndSend } from './sync.js';
 import { emailDomain, routingRuleMatches, wildcardMatch } from '../shared/intelligence.js';
 
-type AliasRow={id:string;account_id:string;address:string;pattern:string|null;persona:string|null;tone:string|null;default_language:string;folder:string|null;notification_priority:string;ai_mode:string;signature_id:string|null;forward_to_json:string;is_dynamic:number};
+type AliasRow={id:string;account_id:string;address:string;pattern:string|null;persona:string|null;tone:string|null;default_language:string;folder:string|null;notification_priority:string;ai_mode:string;signature_id:string|null;glossary_json:string;forward_to_json:string;is_dynamic:number};
 type Intel={category:string;priority:string;needs_reply:boolean;needs_me:boolean;waiting:boolean;language:string;why_it_matters:string;summary:string;actions:any[];deadline_at:string|null;labels:string[];confidence:number;sensitive:boolean};
 
 const lower=(v:any)=>String(v||'').trim().toLowerCase();
@@ -28,8 +28,8 @@ export async function resolveAlias(message:any):Promise<AliasRow|null>{
     if(exact)return exact;
     const inherited=rows.find(a=>a.pattern&&wildcardMatch(a.pattern.includes('@')?a.pattern:`${a.pattern}@${emailDomain(address)}`,address));
     const id=uid('alias_'),now=isoNow();
-    await run(`INSERT OR IGNORE INTO aliases(id,account_id,address,pattern,persona,tone,default_language,folder,notification_priority,ai_mode,signature_id,forward_to_json,is_dynamic,enabled,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,1,?,?)`,[id,account.account_id,address,null,inherited?.persona||null,inherited?.tone||null,inherited?.default_language||'auto',inherited?.folder||null,inherited?.notification_priority||'normal',inherited?.ai_mode||'inherit',inherited?.signature_id||null,inherited?.forward_to_json||'[]',now,now]);
+    await run(`INSERT OR IGNORE INTO aliases(id,account_id,address,pattern,persona,tone,default_language,folder,notification_priority,ai_mode,signature_id,glossary_json,forward_to_json,is_dynamic,enabled,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1,1,?,?)`,[id,account.account_id,address,null,inherited?.persona||null,inherited?.tone||null,inherited?.default_language||'auto',inherited?.folder||null,inherited?.notification_priority||'normal',inherited?.ai_mode||'inherit',inherited?.signature_id||null,inherited?.glossary_json||'[]',inherited?.forward_to_json||'[]',now,now]);
     return one<AliasRow>('SELECT * FROM aliases WHERE account_id=? AND address=?',[account.account_id,address]);
   }
   return null;
@@ -53,11 +53,11 @@ export async function resolveOutboundAlias(addressInput:string):Promise<AliasRow
   const exact=rows.find(a=>lower(a.address)===address);if(exact)return exact;
   const inherited=rows.find(a=>a.pattern&&wildcardMatch(a.pattern.includes('@')?a.pattern:`${a.pattern}@${d}`,address));
   const id=uid('alias_'),now=isoNow();
-  await run(`INSERT OR IGNORE INTO aliases(id,account_id,address,pattern,persona,tone,default_language,folder,notification_priority,ai_mode,signature_id,forward_to_json,is_dynamic,enabled,created_at,updated_at)
+  await run(`INSERT OR IGNORE INTO aliases(id,account_id,address,pattern,persona,tone,default_language,folder,notification_priority,ai_mode,signature_id,glossary_json,forward_to_json,is_dynamic,enabled,created_at,updated_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,1,?,?)`,[
       id,account.account_id,address,null,inherited?.persona||null,inherited?.tone||null,inherited?.default_language||'auto',
       inherited?.folder||null,inherited?.notification_priority||'normal',inherited?.ai_mode||'inherit',
-      inherited?.signature_id||null,inherited?.forward_to_json||'[]',now,now
+      inherited?.signature_id||null,inherited?.glossary_json||'[]',inherited?.forward_to_json||'[]',now,now
     ]);
   return one<AliasRow>('SELECT * FROM aliases WHERE account_id=? AND address=?',[account.account_id,address]);
 }
@@ -128,8 +128,37 @@ export async function summarizeAttachment(attachmentId:string){
   });
 }
 
-export async function languageTransform(input:{text:string;sourceLanguage?:string;targetLanguage:string;mode?:string;tone?:string}){
-  return ai('/v1/language',{text:input.text,source_language:input.sourceLanguage||'auto',target_language:input.targetLanguage,mode:input.mode||'translate',tone:input.tone||'professional',preserve:['names','account numbers','URLs','currency values','reference numbers','quoted text']});
+export async function languageTransform(input:{text:string;sourceLanguage?:string;targetLanguage:string;mode?:string;tone?:string;from?:string}){
+  const alias=input.from?await resolveOutboundAlias(input.from):null;
+  return ai('/v1/language',{
+    text:input.text,source_language:input.sourceLanguage||'auto',target_language:input.targetLanguage,
+    mode:input.mode||'translate',tone:input.tone||alias?.tone||'professional',
+    glossary:alias?json<string[]>(alias.glossary_json,[]):[],
+    persona:alias?.persona||null,
+    preserve:['names','account numbers','URLs','currency values','reference numbers','quoted text'],
+  });
+}
+
+export async function threadAssist(threadId:string){
+  const rows=await all<any>('SELECT direction,from_address,to_json,subject,text_body,preview,created_at FROM messages WHERE thread_id=? AND deleted_at IS NULL ORDER BY created_at',[threadId]);
+  if(!rows.length)throw new Error('Thread not found');
+  const transcript=rows.slice(-30).map(r=>({
+    direction:r.direction,from:r.from_address,to:json<string[]>(r.to_json,[]),subject:r.subject,
+    text:String(r.text_body||r.preview||'').slice(0,8000),created_at:r.created_at,
+  }));
+  const lastInbound=[...rows].reverse().find(r=>r.direction==='inbound');
+  const contact=lastInbound?await one<any>('SELECT * FROM contact_memory WHERE email=?',[parseEmail(lastInbound.from_address)]):null;
+  return ai('/v1/thread-assist',{threadId,contact,messages:transcript});
+}
+
+export async function contactTimeline(emailInput:string){
+  const email=parseEmail(emailInput);
+  if(!email.includes('@'))throw new Error('Valid contact email required');
+  const contact=await one<any>('SELECT * FROM contact_memory WHERE email=?',[email]);
+  const messages=await all<any>(`SELECT id,thread_id,direction,from_address,to_json,subject,preview,created_at,status
+    FROM messages WHERE lower(from_address)=? OR lower(to_json) LIKE ? ORDER BY created_at DESC LIMIT 80`,
+    [email,`%${email}%`]);
+  return{contact:contact?{...contact,tags:json(contact.tags_json,[])}:null,messages:messages.map(m=>({...m,to:json(m.to_json,[])}))};
 }
 export async function smartSearch(query:string){
   const rows=await all<any>(`SELECT m.thread_id,m.from_address,m.subject,m.preview,m.created_at,mi.category,mi.priority,mi.needs_reply,mi.needs_me,mi.waiting,mi.language,mi.summary,mi.labels_json FROM messages m LEFT JOIN message_intelligence mi ON mi.message_id=m.id WHERE m.deleted_at IS NULL ORDER BY m.created_at DESC LIMIT 300`);
