@@ -81,12 +81,12 @@ export async function analyzeInbound(messageId:string){
   if(route.reminder)await createReminder(m.thread_id,m.id,'follow_up',String(route.reminder),'Routing rule follow-up');
   if(final.deadline_at)await createReminder(m.thread_id,m.id,'deadline',final.deadline_at,final.why_it_matters||'Email deadline');
   const email=parseEmail(m.from_address);if(email.includes('@'))await run(`INSERT INTO contact_memory(email,name,preferred_language,last_thread_id,last_contact_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET name=coalesce(excluded.name,contact_memory.name),preferred_language=coalesce(excluded.preferred_language,contact_memory.preferred_language),last_thread_id=excluded.last_thread_id,last_contact_at=excluded.last_contact_at,updated_at=excluded.updated_at`,[email,m.from_name||null,final.language==='unknown'?null:final.language,m.thread_id,m.created_at||now,now]);
-  const forwardTo=(route.forwardTo||[]).map((x:string)=>parseEmail(x)).filter((x:string)=>x.includes('@')&&x!==parseEmail(m.from_address)&&x!==alias?.address);
+  const forwardTo:string[]=(route.forwardTo||[]).map((x:string)=>parseEmail(x)).filter((x:string)=>x.includes('@')&&x!==parseEmail(m.from_address)&&x!==alias?.address);
   if(alias&&forwardTo.length){
     await queueAndSend({
       localId:`routefwd_${m.id}`,
       from:alias.address,
-      to:[...new Set(forwardTo)],
+      to:[...new Set<string>(forwardTo)],
       subject:/^fwd:/i.test(m.subject||'')?m.subject:`Fwd: ${m.subject||'(no subject)'}`,
       text:`Forwarded automatically by GIBP Mail routing.\n\nFrom: ${m.from_address}\nTo: ${json<string[]>(m.to_json,[]).join(', ')}\nSubject: ${m.subject||''}\n\n${m.text_body||m.preview||''}`,
     });
