@@ -1,0 +1,14 @@
+name = "gibp-mail-event-relay"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+# Required secrets:
+#   npx wrangler secret put RESEND_WEBHOOK_SECRET
+#   npx wrangler secret put GIBP_EVENT_TOKEN
+#
+# Optional near-instant wake target:
+#   npx wrangler secret put PUSH_TARGET_URL
+#   npx wrangler secret put PUSH_TARGET_TOKEN
+#
+# Optional durable minimal-event queue: bind a KV namespace as EVENTS.
+# No email body, HTML, attachment or full webhook payload is persisted.
