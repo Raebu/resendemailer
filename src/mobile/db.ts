@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS aliases (
   color TEXT,
   notification_priority TEXT NOT NULL DEFAULT 'normal',
   ai_mode TEXT NOT NULL DEFAULT 'inherit',
+  glossary_json TEXT NOT NULL DEFAULT '[]',
   forward_to_json TEXT NOT NULL DEFAULT '[]',
   is_dynamic INTEGER NOT NULL DEFAULT 0,
   enabled INTEGER NOT NULL DEFAULT 1,
