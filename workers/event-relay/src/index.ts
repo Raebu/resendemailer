@@ -37,7 +37,8 @@ async function verifyWebhook(request:Request,raw:string,secret:string):Promise<b
   if(!Number.isFinite(seconds)||Math.abs(Date.now()/1000-seconds)>300)return false;
   const keyRaw=secret.replace(/^whsec_/,'');
   let key:Uint8Array;try{key=base64Bytes(keyRaw);}catch{return false;}
-  const cryptoKey=await crypto.subtle.importKey('raw',key,{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  const keyData=key.buffer.slice(key.byteOffset,key.byteOffset+key.byteLength) as ArrayBuffer;
+  const cryptoKey=await crypto.subtle.importKey('raw',keyData,{name:'HMAC',hash:'SHA-256'},false,['sign']);
   const signed=new TextEncoder().encode(`${id}.${ts}.${raw}`);
   const digest=new Uint8Array(await crypto.subtle.sign('HMAC',cryptoKey,signed));
   for(const part of sig.split(' ')){
