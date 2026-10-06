@@ -90,6 +90,7 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
   const [aliasColor,setAliasColor]=useState('#c8a96b');
   const [aliasPriority,setAliasPriority]=useState('normal');
   const [aliasAiMode,setAliasAiMode]=useState('inherit');
+  const [aliasGlossary,setAliasGlossary]=useState('');
   const [aliasForwardTo,setAliasForwardTo]=useState('');
 
   const [routeName,setRouteName]=useState('');
@@ -234,9 +235,10 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
       displayName:aliasDisplayName.trim()||null,persona:aliasPersona.trim()||null,tone:aliasTone,defaultLanguage:aliasLanguage,
       signatureId:aliasSignature||null,folder:aliasFolder.trim()||null,color:aliasColor||null,
       notificationPriority:aliasPriority,aiMode:aliasAiMode,
+      glossary:aliasGlossary.split(/\n|,/).map(v=>v.trim()).filter(Boolean),
       forwardTo:aliasForwardTo.split(',').map(v=>v.trim()).filter(Boolean)
     })});
-    setAliasAddress('');setAliasPattern('');setAliasDisplayName('');setAliasPersona('');setAliasFolder('');setAliasForwardTo('');
+    setAliasAddress('');setAliasPattern('');setAliasDisplayName('');setAliasPersona('');setAliasFolder('');setAliasGlossary('');setAliasForwardTo('');
   });
 
   const saveRoutingRule=()=>action(async()=>{
@@ -341,6 +343,7 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
               <select className={inputClass} value={aliasAiMode} onChange={e=>setAliasAiMode(e.target.value)} aria-label="Alias AI policy">
                 <option value="inherit">Inherit global AI policy</option><option value="draft">AI draft only</option><option value="auto_safe">Auto-send safe categories</option><option value="off">No autonomous reply</option>
               </select>
+              <textarea className={inputClass} value={aliasGlossary} onChange={e=>setAliasGlossary(e.target.value)} placeholder={"Terminology / glossary (one per line)\nNPR = Nepalese rupee\nSiddhartha Bank = keep unchanged"}/>
               <input className={inputClass} value={aliasForwardTo} onChange={e=>setAliasForwardTo(e.target.value)} placeholder="Forward to (optional, comma separated)"/>
               <button className="settingsPrimary" disabled={busy} onClick={()=>void saveAlias()}>Save alias / family</button>
             </div>
