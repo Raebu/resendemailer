@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { mailApi as api } from './mailApi.js';
+import { MailIcon } from './MailIcon.js';
 
 type Props = {
   onClose: () => void;
@@ -193,7 +194,7 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
           <h2>GIBP Mail Settings</h2>
           <p>{native ? 'Phone-primary mailbox controller' : 'Desktop replica / local client'}</p>
         </div>
-        <button onClick={onClose}>×</button>
+        <button onClick={onClose} aria-label="Close settings"><MailIcon name="close" size={21}/></button>
       </header>
 
       {!native && <div className="settingsNotice">
@@ -203,7 +204,7 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
       {native && <>
         <div className="settingsGrid">
           <section className="settingsCard">
-            <h3>Resend accounts</h3>
+            <h3><MailIcon name="mail" size={18}/>Resend accounts</h3>
             <p>Add as many Resend accounts/teams as you need. The key is validated before it is retained in the encrypted phone database.</p>
             <input className={inputClass} value={accountName} onChange={e=>setAccountName(e.target.value)} placeholder="Account / company name"/>
             <input className={inputClass} type="password" value={accountKey} onChange={e=>setAccountKey(e.target.value)} placeholder="re_…"/>
@@ -218,7 +219,7 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
           </section>
 
           <section className="settingsCard">
-            <h3>AI gateway</h3>
+            <h3><MailIcon name="check" size={18}/>AI gateway</h3>
             <p>The OpenAI key stays in the stateless gateway, never in the APK. Mail remains stored on this device.</p>
             <input className={inputClass} value={aiUrl} onChange={e=>setAiUrl(e.target.value)} placeholder="https://gibp-mail-ai-gateway.…workers.dev"/>
             <input className={inputClass} type="password" value={aiToken} onChange={e=>setAiToken(e.target.value)} placeholder="Gateway bearer token"/>
@@ -234,7 +235,7 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
           </section>
 
           <section className="settingsCard">
-            <h3>PC replica</h3>
+            <h3><MailIcon name="sync" size={18}/>PC replica</h3>
             <p>The phone is authoritative. When your PC is reachable, changed revisions and local attachments are pushed to it over HTTPS.</p>
             <input className={inputClass} value={replicaName} onChange={e=>setReplicaName(e.target.value)} placeholder="Garuda PC"/>
             <input className={inputClass} value={replicaUrl} onChange={e=>setReplicaUrl(e.target.value)} placeholder="https://your-pc-private-address"/>
@@ -250,7 +251,7 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
           </section>
 
           <section className="settingsCard settingsWide">
-            <h3>Business development campaigns</h3>
+            <h3><MailIcon name="send" size={18}/>Business development campaigns</h3>
             <p>Campaigns are local, suppression-aware and capped at 25 new sends per hour. A reply or unsubscribe stops that contact automatically.</p>
             <div className="settingsTwo">
               <input className={inputClass} value={campaignName} onChange={e=>setCampaignName(e.target.value)} placeholder="Campaign name"/>
