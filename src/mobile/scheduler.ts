@@ -1,14 +1,14 @@
 import { CapacitorHttp } from '@capacitor/core';
 import { isoNow, json, one, run, all, uid } from './db.js';
 import { queueAndSend } from './sync.js';
+import { deliveryStatusForEvent, scheduledDueAt, shouldSuppressDeliveryEvent } from '../shared/intelligence.js';
 
 export async function scheduleSend(payload:any,scheduledAt:string,undoSeconds=0){
   const id=uid('sched_'),now=isoNow();
-  const undoUntil=undoSeconds>0?new Date(Date.now()+undoSeconds*1000).toISOString():null;
-  const due=undoUntil&&new Date(undoUntil)>new Date(scheduledAt)?undoUntil:scheduledAt;
+  const timing=scheduledDueAt(scheduledAt,undoSeconds);
   await run('INSERT INTO scheduled_sends(id,payload_json,scheduled_at,state,undo_until,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',
-    [id,JSON.stringify(payload),due,'scheduled',undoUntil,now,now]);
-  return{id,status:'scheduled',scheduledAt:due,undoUntil};
+    [id,JSON.stringify(payload),timing.scheduledAt,'scheduled',timing.undoUntil,now,now]);
+  return{id,status:'scheduled',scheduledAt:timing.scheduledAt,undoUntil:timing.undoUntil};
 }
 export async function cancelScheduled(id:string){
   await run("UPDATE scheduled_sends SET state='cancelled',updated_at=? WHERE id=? AND state='scheduled'",[isoNow(),id]);
@@ -49,17 +49,13 @@ export async function recordDeliveryEvent(input:{
       id,input.providerEventId||null,input.accountId||null,input.providerMessageId||null,local?.id||null,
       input.eventType,input.recipient?.toLowerCase()||null,JSON.stringify(input.payload||{}),input.occurredAt||now,now,
     ]);
-  const suppressEvents=new Set(['email.bounced','email.complained','email.failed','contact.unsubscribed']);
-  if(input.recipient&&suppressEvents.has(input.eventType)){
+  if(input.recipient&&shouldSuppressDeliveryEvent(input.eventType)){
     await run("INSERT INTO suppressions(email,reason,created_at) VALUES(?,?,?) ON CONFLICT(email) DO UPDATE SET reason=excluded.reason",
       [input.recipient.toLowerCase(),input.eventType,now]);
   }
   if(local?.id){
-    const statusMap:Record<string,string>={
-      'email.delivered':'delivered','email.bounced':'bounced','email.complained':'complained',
-      'email.failed':'failed','email.sent':'sent','email.delivery_delayed':'delayed',
-    };
-    if(statusMap[input.eventType])await run('UPDATE messages SET status=? WHERE id=?',[statusMap[input.eventType],local.id]);
+    const status=deliveryStatusForEvent(input.eventType);
+    if(status)await run('UPDATE messages SET status=? WHERE id=?',[status,local.id]);
   }
   return{id,localMessageId:local?.id||null};
 }
