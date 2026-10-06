@@ -1,3 +1,4 @@
+import { CapacitorHttp } from '@capacitor/core';
 import { isoNow, json, one, run, all, uid } from './db.js';
 import { queueAndSend } from './sync.js';
 
@@ -61,4 +62,38 @@ export async function recordDeliveryEvent(input:{
     if(statusMap[input.eventType])await run('UPDATE messages SET status=? WHERE id=?',[statusMap[input.eventType],local.id]);
   }
   return{id,localMessageId:local?.id||null};
+}
+
+
+async function getSetting(key:string):Promise<string|null>{
+  return (await one<{value:string}>('SELECT value FROM settings WHERE key=?',[key]))?.value||null;
+}
+async function setSetting(key:string,value:string):Promise<void>{
+  await run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',[key,value]);
+}
+export async function configureEventRelay(url:string,token:string):Promise<void>{
+  if(url&&!/^https:\/\//i.test(url))throw new Error('Event relay must use HTTPS');
+  await setSetting('event_relay_url',url.replace(/\/$/,''));
+  await setSetting('event_relay_token',token);
+}
+export async function syncEventRelay():Promise<{imported:number;cursor:string|null}>{
+  const url=await getSetting('event_relay_url'),token=await getSetting('event_relay_token');
+  if(!url||!token)return{imported:0,cursor:null};
+  const after=await getSetting('event_relay_cursor')||'';
+  const response=await CapacitorHttp.get({
+    url:`${url}/events${after?`?after=${encodeURIComponent(after)}`:''}`,
+    headers:{Authorization:`Bearer ${token}`},connectTimeout:15_000,readTimeout:30_000,
+  });
+  if(response.status===501)return{imported:0,cursor:after||null};
+  if(response.status<200||response.status>=300)throw new Error(String(response.data?.error||`Event relay HTTP ${response.status}`));
+  const events=Array.isArray(response.data?.events)?response.data.events:[];
+  for(const event of events){
+    await recordDeliveryEvent({
+      providerEventId:event.id,providerMessageId:event.email_id||undefined,eventType:String(event.type||'unknown'),
+      recipient:event.recipient||undefined,occurredAt:event.created_at||undefined,payload:{source:'event-relay'},
+    });
+  }
+  const cursor=response.data?.cursor?String(response.data.cursor):after;
+  if(cursor)await setSetting('event_relay_cursor',cursor);
+  return{imported:events.length,cursor:cursor||null};
 }
