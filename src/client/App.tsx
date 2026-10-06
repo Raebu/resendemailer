@@ -3,6 +3,7 @@ import type { Folder, Identity, MessageDetail, MessageSummary, Status, ThreadDet
 import { mailApi as api, openAttachment } from './mailApi.js';
 import { MailIcon, type MailIconName } from './MailIcon.js';
 import { SettingsPanel } from './SettingsPanel.js';
+import { IntelligencePanel } from './IntelligencePanel.js';
 
 type Draft = {
   id:string; replyToMessageId:string|null; fromIdentity:string; to:string[]; cc:string[]; bcc:string[];
@@ -49,6 +50,7 @@ function App() {
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState<string|null>(null);
   const [settingsOpen,setSettingsOpen] = useState(false);
+  const [intelligenceOpen,setIntelligenceOpen] = useState(false);
   const [mobileFoldersOpen,setMobileFoldersOpen] = useState(false);
   const [mobileSearchOpen,setMobileSearchOpen] = useState(false);
   const [translations,setTranslations] = useState<Record<string,{text:string;backTranslation:string}>>({});
@@ -88,6 +90,10 @@ function App() {
   const openThread=async (m:MessageSummary)=>{
     const value=await api<ThreadDetail>(`/api/threads/${m.threadId}`);
     setThread(value); void loadList();
+  };
+  const openThreadId=async(threadId:string)=>{
+    const value=await api<ThreadDetail>(`/api/threads/${threadId}`);
+    setIntelligenceOpen(false);setThread(value);void loadList();
   };
   const patch=async(id:string,body:Record<string,unknown>)=>{
     await api(`/api/messages/${id}`,{method:'PATCH',body:JSON.stringify(body)});
@@ -213,7 +219,8 @@ function App() {
           <MailIcon name="search" size={19}/>
           <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search mail" aria-label="Search mail"/>
         </div>
-        <button className="iconBtn" onClick={()=>setSettingsOpen(true)} title="Settings" aria-label="Settings"><MailIcon name="settings"/></button>
+        <button className="iconBtn" onClick={()=>setIntelligenceOpen(true)} title="GIBP Intelligence" aria-label="GIBP Intelligence"><MailIcon name="sparkles"/></button>
+                <button className="iconBtn" onClick={()=>setSettingsOpen(true)} title="Settings" aria-label="Settings"><MailIcon name="settings"/></button>
         <button className="iconBtn" onClick={runSync} disabled={busy} title="Sync now" aria-label="Sync now">
           <MailIcon name="sync" className={busy||status?.syncing?'spin':''}/>
         </button>
@@ -231,6 +238,7 @@ function App() {
           <button className="mobileIconButton" onClick={()=>setMobileSearchOpen(v=>!v)} aria-label="Search">
             <MailIcon name={mobileSearchOpen?'close':'search'} size={22}/>
           </button>
+          <button className="mobileIconButton" onClick={()=>setIntelligenceOpen(true)} aria-label="GIBP Intelligence"><MailIcon name="sparkles" size={21}/></button>
           <button className="mobileIconButton" onClick={()=>void runSync()} disabled={busy} aria-label="Sync now">
             <MailIcon name="sync" size={21} className={busy||status?.syncing?'spin':''}/>
           </button>
@@ -395,6 +403,7 @@ function App() {
       </section>
     </div>}
 
+    {intelligenceOpen&&<IntelligencePanel onClose={()=>setIntelligenceOpen(false)} onOpenThread={id=>void openThreadId(id)} onError={message=>setError(message)}/>}
     {compose&&<Compose value={compose} identities={identities} busy={busy} onChange={setCompose} onClose={()=>setCompose(null)} onSend={options=>void send(options)}/>}
     {settingsOpen&&<SettingsPanel onClose={()=>setSettingsOpen(false)} onChanged={()=>void Promise.all([api<Identity[]>('/api/identities').then(setIdentities),refreshStatus(),loadList()])} onError={setError}/>}
   </div>
