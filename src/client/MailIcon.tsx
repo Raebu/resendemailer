@@ -1,11 +1,11 @@
-import type { SVGProps } from 'react';
+import type { ReactNode, SVGProps } from 'react';
 
 export type MailIconName =
   | 'menu' | 'search' | 'settings' | 'sync' | 'inbox' | 'star' | 'send'
   | 'draft' | 'clock' | 'archive' | 'trash' | 'compose' | 'back' | 'attach'
   | 'reply' | 'more' | 'close' | 'mail' | 'check';
 
-const paths:Record<MailIconName,JSX.Element>={
+const paths:Record<MailIconName,ReactNode>={
   menu:<><path d="M4 6h16M4 12h16M4 18h16"/></>,
   search:<><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></>,
   settings:<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.36a1.7 1.7 0 0 0-1.87.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3v-4h.04A1.7 1.7 0 0 0 4.6 8.92a1.7 1.7 0 0 0-.34-1.87L4.2 7l2.83-2.83.06.06a1.7 1.7 0 0 0 1.87.34A1.7 1.7 0 0 0 10 3.04V3h4v.04a1.7 1.7 0 0 0 1.04 1.53 1.7 1.7 0 0 0 1.87-.34l.06-.06L19.8 7l-.06.05a1.7 1.7 0 0 0-.34 1.87A1.7 1.7 0 0 0 20.96 10H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z"/></>,
