@@ -1,6 +1,6 @@
 # GIBP Mail
 
-> **Device handoff:** before doing live Android installation/configuration, use [`docs/CODEX_HANDOFF.md`](docs/CODEX_HANDOFF.md). After `npm install`, `npm run preflight` now performs the full local validation/build/checksum pass, and `npm run android:install` installs and smoke-tests the resulting APK over ADB.
+> **Device handoff:** before doing live Android installation/configuration, use [`docs/CODEX_HANDOFF.md`](docs/CODEX_HANDOFF.md). From a fresh clone, `npm run preflight` performs deterministic dependency installs plus the full app/Worker/Android validation and APK checksum pass; `npm run android:install` builds if necessary, then installs and smoke-tests the APK over ADB.
 
 
 GIBP Mail is a **phone-primary, local-first email client for Resend**.
