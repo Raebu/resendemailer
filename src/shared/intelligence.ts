@@ -31,7 +31,7 @@ export function wildcardMatch(pattern:string,value:string):boolean{
   for(const char of pattern){
     if(char==='*')source+='.*';
     else if(char==='?')source+='.';
-    else source+=specials.includes(char)?'\\\\'+char:char;
+    else source+=specials.includes(char)?'\\'+char:char;
   }
   source+='$';
   return new RegExp(source,'i').test(value);
