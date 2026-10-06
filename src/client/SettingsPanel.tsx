@@ -55,6 +55,10 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
   const [rules, setRules] = useState<Rule[]>([]);
   const [replicas, setReplicas] = useState<Replica[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [aliases,setAliases]=useState<any[]>([]);
+  const [routingRules,setRoutingRules]=useState<any[]>([]);
+  const [signatures,setSignatures]=useState<any[]>([]);
+  const [templates,setTemplates]=useState<any[]>([]);
   const [busy, setBusy] = useState(false);
 
   const [accountName, setAccountName] = useState('');
@@ -72,18 +76,40 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
   const [campaignObjective, setCampaignObjective] = useState('');
   const [campaignContacts, setCampaignContacts] = useState('');
 
+  const [aliasAccount,setAliasAccount]=useState('');
+  const [aliasAddress,setAliasAddress]=useState('');
+  const [aliasPattern,setAliasPattern]=useState('');
+  const [aliasPersona,setAliasPersona]=useState('');
+  const [aliasTone,setAliasTone]=useState('professional');
+  const [aliasLanguage,setAliasLanguage]=useState('auto');
+  const [aliasSignature,setAliasSignature]=useState('');
+
+  const [routeName,setRouteName]=useState('');
+  const [routeConditions,setRouteConditions]=useState('{\n  "to": "bank*@gibp.global"\n}');
+  const [routeActions,setRouteActions]=useState('{\n  "priority": "high",\n  "needsMe": true\n}');
+
+  const [signatureName,setSignatureName]=useState('');
+  const [signatureBody,setSignatureBody]=useState('');
+  const [templateName,setTemplateName]=useState('');
+  const [templateSubject,setTemplateSubject]=useState('');
+  const [templateBody,setTemplateBody]=useState('');
+  const [templateLanguage,setTemplateLanguage]=useState('');
+
   const refresh = async () => {
     if (!native) return;
-    const [a, r, p, c] = await Promise.all([
+    const [a, r, p, c, al, rr, sig, tpl] = await Promise.all([
       api<Account[]>('/api/accounts'),
       api<Rule[]>('/api/automation/rules'),
       api<Replica[]>('/api/replicas'),
       api<Campaign[]>('/api/campaigns'),
+      api<any[]>('/api/aliases'),
+      api<any[]>('/api/routing-rules'),
+      api<any[]>('/api/signatures'),
+      api<any[]>('/api/templates'),
     ]);
-    setAccounts(a);
-    setRules(r);
-    setReplicas(p);
-    setCampaigns(c);
+    setAccounts(a);setRules(r);setReplicas(p);setCampaigns(c);
+    setAliases(al);setRoutingRules(rr);setSignatures(sig);setTemplates(tpl);
+    if(!aliasAccount&&a[0]?.id)setAliasAccount(a[0].id);
   };
 
   useEffect(() => {
