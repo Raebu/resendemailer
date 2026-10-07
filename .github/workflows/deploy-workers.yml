@@ -94,7 +94,7 @@ jobs:
           set -euo pipefail
           WRANGLER="./workers/ai-gateway/node_modules/.bin/wrangler"
           TITLE="gibp-mail-events"
-          ID="$("$WRANGLER" kv namespace list --json | jq -r --arg title "$TITLE" '.[] | select(.title == $title) | .id' | head -n1)"
+          ID="$("$WRANGLER" kv namespace list | jq -r --arg title "$TITLE" '.[] | select(.title == $title) | .id' | head -n1)"
           if [[ -z "$ID" ]]; then
             OUTPUT="$("$WRANGLER" kv namespace create "$TITLE")"
             ID="$(printf '%s\n' "$OUTPUT" | sed -n 's/.*id = "\([^"]*\)".*/\1/p' | head -n1)"
