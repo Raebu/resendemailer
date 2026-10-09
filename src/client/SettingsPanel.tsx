@@ -12,6 +12,8 @@ type Props = {
 type Account = {
   id: string;
   name: string;
+  auth_mode?: 'oauth' | 'api_key' | string;
+  oauth_scope?: string | null;
   enabled: number;
   verified_domains: number;
   last_sync_at?: string | null;
@@ -125,6 +127,24 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
     void refresh().catch(e => onError(e instanceof Error ? e.message : String(e)));
   }, []);
 
+  useEffect(() => {
+    const connected=() => {
+      void refresh()
+        .then(()=>{onError(null);onChanged();})
+        .catch(e=>onError(e instanceof Error?e.message:String(e)));
+    };
+    const failed=(event:Event) => {
+      const message=(event as CustomEvent<string>).detail || 'Unable to connect the Resend account.';
+      onError(String(message));
+    };
+    window.addEventListener('gibp:resend-connected',connected);
+    window.addEventListener('gibp:resend-error',failed);
+    return()=>{
+      window.removeEventListener('gibp:resend-connected',connected);
+      window.removeEventListener('gibp:resend-error',failed);
+    };
+  }, []);
+
   const action = async (fn: () => Promise<void>) => {
     setBusy(true);
     onError(null);
@@ -139,14 +159,26 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
     }
   };
 
-  const addAccount = () => action(async () => {
-    if (!accountName.trim() || !accountKey.trim()) throw new Error('Account name and Resend API key are required.');
+  const connectResend = () => action(async () => {
+    await api('/api/accounts/oauth/start', {
+      method: 'POST',
+      body: JSON.stringify({ name: accountName.trim() || 'Resend account' }),
+    });
+    setAccountName('');
+  });
+
+  const addApiKeyAccount = () => action(async () => {
+    if (!accountKey.trim()) throw new Error('A Resend API key is required.');
     await api('/api/accounts', {
       method: 'POST',
-      body: JSON.stringify({ name: accountName.trim(), apiKey: accountKey.trim() }),
+      body: JSON.stringify({ name: accountName.trim() || 'Resend account', apiKey: accountKey.trim() }),
     });
     setAccountName('');
     setAccountKey('');
+  });
+
+  const disconnectAccount = (id:string) => action(async () => {
+    await api(`/api/accounts/${encodeURIComponent(id)}`, { method:'DELETE' });
   });
 
   const saveAi = () => action(async () => {
@@ -285,14 +317,25 @@ export function SettingsPanel({ onClose, onChanged, onError }: Props) {
         <div className="settingsGrid">
           <section className="settingsCard">
             <h3><MailIcon name="mail" size={18}/>Resend accounts</h3>
-            <p>Add as many Resend accounts/teams as you need. The key is validated before it is retained in the encrypted phone database.</p>
-            <input className={inputClass} value={accountName} onChange={e=>setAccountName(e.target.value)} placeholder="Account / company name"/>
-            <input className={inputClass} type="password" value={accountKey} onChange={e=>setAccountKey(e.target.value)} placeholder="re_…"/>
-            <button className="settingsPrimary" disabled={busy} onClick={()=>void addAccount()}>Add Resend account</button>
+            <p>Connect any Resend account/team with OAuth. GIBP requests full access so it can discover domains and synchronize received and sent mail; no API key is required.</p>
+            <input className={inputClass} value={accountName} onChange={e=>setAccountName(e.target.value)} placeholder="Account / company label (optional)"/>
+            <button className="settingsPrimary" disabled={busy} onClick={()=>void connectResend()}>Connect Resend</button>
+            <details>
+              <summary>API-key fallback</summary>
+              <p>For legacy or headless setups, a dedicated Resend API key can still be added manually.</p>
+              <input className={inputClass} type="password" value={accountKey} onChange={e=>setAccountKey(e.target.value)} placeholder="re_…"/>
+              <button className="settingsPrimary" disabled={busy} onClick={()=>void addApiKeyAccount()}>Add with API key</button>
+            </details>
             <div className="settingsList">
               {accounts.map(a => <article key={a.id}>
-                <div><b>{a.name}</b><small>{a.verified_domains} verified domain{a.verified_domains===1?'':'s'}</small></div>
-                <span className={a.last_error ? 'pill warn' : 'pill ok'}>{a.last_error ? 'Check' : 'Connected'}</span>
+                <div>
+                  <b>{a.name}</b>
+                  <small>{a.verified_domains} verified domain{a.verified_domains===1?'':'s'} • {a.auth_mode==='oauth'?'OAuth':'API key'}</small>
+                </div>
+                <div>
+                  <span className={a.last_error ? 'pill warn' : 'pill ok'}>{a.last_error ? 'Check' : 'Connected'}</span>
+                  <button disabled={busy} onClick={()=>void disconnectAccount(a.id)}>Disconnect</button>
+                </div>
               </article>)}
               {!accounts.length && <em>No Resend accounts connected yet.</em>}
             </div>
