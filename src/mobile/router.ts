@@ -4,7 +4,8 @@ import { mobileResend, type MobileAccount } from './resend.js';
 import { accountForSender, flushMobileOutbox, refreshDomains, queueAndSend, syncAllAccounts } from './sync.js';
 import { configureAi, createDefaultRule, evaluateInbound, reconcileCampaignReplies, runCampaignTick } from './automation.js';
 import { pushAllReplicas, pushReplicaTarget } from './replica.js';
-import { configureBackgroundAccount, removeBackgroundAccount, configureBackgroundAutomation, setBackgroundAutomationMode, setBackgroundSuppressions, setBackgroundForegroundAudit, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
+import { configureBackgroundAccount, removeBackgroundAccount, revokeBackgroundAccount, configureBackgroundAutomation, setBackgroundAutomationMode, setBackgroundSuppressions, setBackgroundForegroundAudit, upsertBackgroundCampaign, getBackgroundAutomationState } from './background.js';
+import { beginResendOAuth, completeResendOAuth, installResendOAuthAccount } from './oauth.js';
 import { analyzeInbound, attentionBriefing, composeContext, contactTimeline, createReminder, languageTransform, markWaiting, smartSearch, snoozeThread, summarizeAttachment, threadAssist } from './intelligence.js';
 import { cancelScheduled, configureEventRelay, flushScheduledSends, listScheduled, recordDeliveryEvent, scheduleSend, syncEventRelay } from './scheduler.js';
 
@@ -81,18 +82,53 @@ async function addAccount(body:any):Promise<any>{
   const apiKey=String(body.apiKey||'').trim();
   if(!/^re_/.test(apiKey))throw new Error('A valid Resend API key is required');
   const id=uid('acct_'), now=isoNow();
-  const account:MobileAccount={id,name,api_key:apiKey,enabled:1};
+  const account:MobileAccount={id,name,api_key:apiKey,auth_mode:'api_key',enabled:1};
   // Validate before retaining the credential.
   await mobileResend.listDomains(account);
-  await run('INSERT INTO accounts(id,name,api_key,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?)',[id,name,apiKey,1,now,now]);
+  await run(
+    'INSERT INTO accounts(id,name,api_key,auth_mode,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',
+    [id,name,apiKey,'api_key',1,now,now],
+  );
   await refreshDomains(account);
   await configureBackgroundAccount(account);
-  return{id,name,enabled:true};
+  return{id,name,enabled:true,authMode:'api_key'};
+}
+
+async function addOAuthAccount(callbackUrl:string):Promise<any>{
+  const grant=await completeResendOAuth(callbackUrl);
+  const id=uid('acct_'),now=isoNow();
+  const account:MobileAccount={
+    id,name:grant.name,api_key:'',auth_mode:'oauth',oauth_client_id:grant.clientId,
+    oauth_scope:grant.scope,enabled:1,
+  };
+
+  // Keep refresh/access tokens only in the native Keystore-backed account store.
+  // SQL contains routing metadata, not OAuth secrets.
+  await installResendOAuthAccount({
+    id,name:grant.name,clientId:grant.clientId,scope:grant.scope,
+    accessToken:grant.accessToken,refreshToken:grant.refreshToken,expiresIn:grant.expiresIn,
+  });
+
+  try{
+    // full_access must be usable before the account becomes part of the mailbox.
+    await mobileResend.listDomains(account);
+    await run(
+      'INSERT INTO accounts(id,name,api_key,auth_mode,oauth_client_id,oauth_scope,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
+      [id,grant.name,'','oauth',grant.clientId,grant.scope,1,now,now],
+    );
+    await refreshDomains(account);
+    return{id,name:grant.name,enabled:true,authMode:'oauth'};
+  }catch(error){
+    // Do not leave a live OAuth grant behind when validation/onboarding fails.
+    try{await revokeBackgroundAccount(id);}
+    catch{try{await removeBackgroundAccount(id);}catch{/* best-effort local cleanup */}}
+    throw error;
+  }
 }
 
 async function accountsPublic():Promise<any[]>{
   return all<any>(`
-    SELECT a.id,a.name,a.enabled,a.last_sync_at,a.last_error,a.created_at,
+    SELECT a.id,a.name,a.auth_mode,a.oauth_scope,a.enabled,a.last_sync_at,a.last_error,a.created_at,
       (SELECT count(*) FROM domains d WHERE d.account_id=a.id AND d.status='verified') verified_domains
     FROM accounts a ORDER BY a.created_at
   `);
@@ -403,10 +439,23 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
 
   if(path==='/api/accounts'&&method==='GET')return await accountsPublic() as T;
   if(path==='/api/accounts'&&method==='POST')return await addAccount(body) as T;
+  if(path==='/api/accounts/oauth/start'&&method==='POST'){
+    return await beginResendOAuth(String(body.name||'Resend account')) as T;
+  }
+  if(path==='/api/accounts/oauth/callback'&&method==='POST'){
+    const callbackUrl=String(body.url||'');
+    if(!callbackUrl)throw new Error('Resend OAuth callback URL is required');
+    return await addOAuthAccount(callbackUrl) as T;
+  }
   if(path.startsWith('/api/accounts/')&&method==='DELETE'){
     const id=decodeURIComponent(path.split('/').pop()!);
+    const account=await one<MobileAccount>('SELECT * FROM accounts WHERE id=?',[id]);
+    if(!account)throw new Error('Account not found');
+    if(account.auth_mode==='oauth')await revokeBackgroundAccount(id);
+    else {
+      try{await removeBackgroundAccount(id);}catch{/* SQL disable still prevents future use */}
+    }
     await run('UPDATE accounts SET enabled=0,updated_at=? WHERE id=?',[isoNow(),id]);
-    try{await removeBackgroundAccount(id);}catch{/* encrypted foreground account remains disabled */}
     return{ok:true} as T;
   }
   const domainRefresh=path.match(/^\/api\/accounts\/([^/]+)\/domains\/refresh$/);

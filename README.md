@@ -3,7 +3,7 @@
 > **Device handoff:** before doing live Android installation/configuration, use [`docs/CODEX_HANDOFF.md`](docs/CODEX_HANDOFF.md). From a fresh clone, `npm run preflight` performs deterministic dependency installs plus the full app/Worker/Android validation and APK checksum pass; `npm run android:install` builds if necessary, then installs and smoke-tests the APK over ADB.
 
 
-GIBP Mail is a **phone-primary, local-first email client for Resend**.
+GIBP Mail is a **phone-primary, local-first universal email client for Resend**. Any Resend account/team can be connected to the same GIBP Mail installation through OAuth, while API-key setup remains available for legacy/headless use.
 
 The Android phone is the authoritative mailbox. Resend provides email transport and temporary recovery; the phone stores the durable encrypted mailbox and attachments. A Linux PC can receive an encrypted-network replica whenever it is online, but the PC never needs to run 24/7.
 
@@ -13,7 +13,8 @@ The Android phone is the authoritative mailbox. Resend provides email transport 
                          Internet
                             |
                      +------+------+
-                     |    Resend   |
+                     | Any Resend  |
+                     | account/team |
                      +------+------+
                             |
                     HTTPS send / receive
@@ -44,7 +45,9 @@ The OpenAI gateway does not hold the mailbox. It receives only the context neede
 
 ### Mail
 
-- multiple independent Resend accounts
+- any number of independent Resend accounts/teams
+- OAuth-first **Connect Resend** onboarding with PKCE and API-key fallback
+- automatic verified-domain discovery/reconciliation for every connected account
 - unified Inbox / Sent / Drafts / Outbox / Starred / Archive / Trash
 - encrypted Android SQLite database using SQLCipher
 - Android app-private local attachment storage
@@ -73,19 +76,24 @@ case-1042@gibp.app
 
 GIBP Mail discovers the account that owns the verified domain and routes the message through that Resend account.
 
-### Multiple Resend accounts
+### Universal Resend accounts
 
-Android **Settings → Resend accounts** can hold multiple Resend accounts/teams.
+Android **Settings → Resend accounts** can connect any Resend account/team. OAuth is the default path: tap **Connect Resend**, approve access in Resend, and Android returns to GIBP Mail through the private-use callback URI `global.gibp.mail://oauth/resend`.
 
-Each account has separate:
+GIBP Mail requests Resend's `full_access` OAuth scope because a real mailbox needs more than send-only access: it must discover domains and synchronize received and sent email. OAuth authorization uses PKCE. Short-lived access tokens are refreshed automatically, and Resend's rotating refresh token is replaced atomically in the Android-Keystore-backed account store.
 
-- encrypted credential
-- verified domains
+Each connected account has separate:
+
+- OAuth authorization (or an optional dedicated API key for legacy/headless setups)
+- verified sending/receiving domains
 - inbound/sent synchronization
 - error state
 - background cursor
+- provider ID namespace
 
-The provider key is namespaced by local Resend-account ID, so provider IDs from different accounts cannot collide.
+The provider key is namespaced by local Resend-account ID, so provider IDs from different accounts cannot collide. Every successful sync reconciles the account's Resend domain inventory, so newly added domains become available automatically and removed domains stop appearing as sender identities.
+
+This makes GIBP Mail account-agnostic: it is not tied to GIBP, Raeburn or any particular Resend login. Multiple organisations, client accounts and Resend teams can coexist on the same device while remaining logically isolated.
 
 ### AI automation
 
@@ -158,7 +166,7 @@ Attachments live in Android app-private storage.
 
 The native WorkManager worker needs to check Resend and, when enabled, execute constrained AI/BD automation while the WebView is closed.
 
-Resend credentials, the AI gateway bearer token, active campaign state, suppressions and the native automation audit used by that worker are stored separately using AES-256-GCM keys created inside **Android Keystore**. They are not written into source code, the APK, plain SharedPreferences or the browser bundle.
+Resend OAuth access/refresh tokens (or legacy API keys), the AI gateway bearer token, active campaign state, suppressions and the native automation audit used by that worker are stored separately using AES-256-GCM keys created inside **Android Keystore**. OAuth refresh is serialized so a rotating refresh token cannot be consumed concurrently, and the newly returned token pair is persisted before reuse. These secrets are not written into source code, the APK, plain SharedPreferences, the SQL mailbox or the browser bundle.
 
 The worker:
 
@@ -220,19 +228,23 @@ For the complete deterministic build plus checksum from a fresh clone, run `npm 
 
 Open GIBP Mail and tap **Settings**.
 
-### 1. Add Resend accounts
+### 1. Connect Resend accounts
 
-For each account/team:
+For each Resend account/team:
 
-- enter a human-readable account/company name;
-- enter a Resend API key;
-- tap **Add Resend account**.
+1. optionally enter a human-readable account/company label;
+2. tap **Connect Resend**;
+3. approve the requested access in the Resend authorization screen;
+4. allow Android to return to GIBP Mail;
+5. GIBP Mail validates the authorization and discovers the account's domains automatically.
 
-GIBP Mail validates the key by querying that account's domains before retaining it.
+Repeat this for as many Resend accounts/teams as you need. Verified sending domains become available immediately for dynamic From addresses, and future domain additions/removals are reconciled automatically during normal synchronization.
 
-Verified sending domains are then available immediately for dynamic From addresses.
+OAuth tokens are not written to the SQL mailbox. The rotating refresh token and short-lived access token live in the Android-Keystore-protected background account store. Disconnecting an OAuth account revokes the Resend grant and removes its secure local credentials.
 
-> Use a dedicated Resend credential for the application rather than reusing unrelated production credentials.
+#### API-key fallback
+
+The Settings screen retains an **API-key fallback** for legacy/headless scenarios. Use a dedicated Resend credential rather than reusing unrelated production credentials. API-key accounts get the same domain routing, mailbox sync, alias, signature and automation behavior as OAuth accounts.
 
 ## OpenAI gateway
 
@@ -434,6 +446,7 @@ The policy tests specifically verify:
 
 - SQLite on desktop uses WAL mode.
 - Android uses an encrypted native SQLite database.
+- OAuth account secrets are isolated in the Android Keystore-backed native store; SQL retains only routing metadata.
 - Provider IDs are namespaced per Resend account.
 - Outgoing messages are stored locally before sending.
 - Retries use stable idempotency keys.
@@ -460,7 +473,7 @@ For that reason:
 
 ### Resend is an API transport
 
-GIBP Mail is not an IMAP server. Gmail, Outlook, Thunderbird and Apple Mail do not connect to it.
+GIBP Mail can connect to any authorised Resend account/team, but it is not an IMAP server. Gmail, Outlook, Thunderbird and Apple Mail do not connect to it. A Resend domain still needs the appropriate sending/receiving configuration in that Resend account before GIBP Mail can use those capabilities.
 
 ### Dynamic sender addresses
 
@@ -484,9 +497,9 @@ These controls should be kept even if models, prompts or campaign strategies cha
 ```
 src/
 ├── client/             shared React UI
-├── mobile/             encrypted Android mailbox + sync/AI/replication
+├── mobile/             encrypted Android mailbox + OAuth/sync/AI/replication
 ├── server/             Linux desktop/replica service
-└── shared/             shared types and safety policy
+└── shared/             shared types, Resend OAuth/PKCE and safety policy
 
 native/android/java/    native Keystore + WorkManager companion
 scripts/                Linux/Android setup helpers

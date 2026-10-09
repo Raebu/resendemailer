@@ -11,7 +11,8 @@ function createSecret(): string {
 
 const schema = `
 CREATE TABLE IF NOT EXISTS accounts (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL,
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '',
+  auth_mode TEXT NOT NULL DEFAULT 'api_key', oauth_client_id TEXT, oauth_scope TEXT,
   enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   last_sync_at TEXT, last_error TEXT
 );
@@ -236,6 +237,15 @@ export async function mobileDb(): Promise<SQLiteDBConnection> {
     : await sqlite.createConnection('gibp_mail', true, 'secret', 1, false);
   await connection.open();
   await connection.execute(schema);
+
+  // Backward-compatible account migration. Existing installations predate OAuth and
+  // retain their API-key accounts unchanged.
+  const accountColumns = await connection.query('PRAGMA table_info(accounts)');
+  const names = new Set((accountColumns.values || []).map((row: any) => String(row.name)));
+  if (!names.has('auth_mode')) await connection.execute("ALTER TABLE accounts ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'api_key'");
+  if (!names.has('oauth_client_id')) await connection.execute('ALTER TABLE accounts ADD COLUMN oauth_client_id TEXT');
+  if (!names.has('oauth_scope')) await connection.execute('ALTER TABLE accounts ADD COLUMN oauth_scope TEXT');
+
   return connection;
 }
 

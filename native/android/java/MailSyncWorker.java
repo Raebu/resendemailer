@@ -103,8 +103,8 @@ public class MailSyncWorker extends Worker {
   private void pollAccount(JSONObject account) throws Exception {
     String id = account.getString("id");
     String name = account.optString("name", "GIBP Mail");
-    String apiKey = account.getString("apiKey");
-    JSONObject response = getJson("https://api.resend.com/emails/receiving?limit=100", apiKey);
+    String bearer = OAuthTokenManager.bearer(context, account);
+    JSONObject response = getJson("https://api.resend.com/emails/receiving?limit=100", bearer);
     JSONArray items = listData(response);
     if (items.length() == 0) return;
 
@@ -129,7 +129,7 @@ public class MailSyncWorker extends Worker {
       fresh.add(item);
     }
 
-    Set<String> verifiedDomains = fetchVerifiedDomains(apiKey);
+    Set<String> verifiedDomains = fetchVerifiedDomains(bearer);
     JSONObject automation = BackgroundMailboxPlugin.getEncryptedObject(context, BackgroundMailboxPlugin.AUTOMATION_KEY);
 
     // Oldest-to-newest preserves reply/campaign ordering.
@@ -141,7 +141,7 @@ public class MailSyncWorker extends Worker {
         try {
           detail = unwrapObject(getJson(
             "https://api.resend.com/emails/receiving/" + urlEncode(providerId),
-            apiKey
+            bearer
           ));
         } catch (Exception ignored) {
           // Summary still supports notification; automation will skip if detail is incomplete.
@@ -170,10 +170,10 @@ public class MailSyncWorker extends Worker {
     prefs.edit().putString("last_" + id, latestId).apply();
   }
 
-  private Set<String> fetchVerifiedDomains(String apiKey) {
+  private Set<String> fetchVerifiedDomains(String bearer) {
     Set<String> domains = new HashSet<>();
     try {
-      JSONArray items = listData(getJson("https://api.resend.com/domains", apiKey));
+      JSONArray items = listData(getJson("https://api.resend.com/domains", bearer));
       for (int i = 0; i < items.length(); i++) {
         JSONObject d = items.optJSONObject(i);
         if (d == null || !"verified".equalsIgnoreCase(d.optString("status", ""))) continue;
@@ -263,11 +263,11 @@ public class MailSyncWorker extends Worker {
       send.put("headers", headers);
     }
 
-    String apiKey = account.getString("apiKey");
+    String bearer = OAuthTokenManager.bearer(context, account);
     String localId = message.optString("id", UUID.randomUUID().toString());
     postJson(
       "https://api.resend.com/emails",
-      apiKey,
+      bearer,
       send,
       "gibp-mobile-reply_" + account.optString("id", "") + "_" + localId
     );
@@ -410,7 +410,7 @@ public class MailSyncWorker extends Worker {
         String contactId = contact.optString("id", UUID.randomUUID().toString());
         postJson(
           "https://api.resend.com/emails",
-          account.getString("apiKey"),
+          OAuthTokenManager.bearer(context, account),
           send,
           "gibp-mobile-bd_" + campaign.optString("id", "") + "_" + contactId + "_" + step
         );
@@ -501,12 +501,12 @@ public class MailSyncWorker extends Worker {
     return json;
   }
 
-  private JSONObject getJson(String url, String apiKey) throws Exception {
+  private JSONObject getJson(String url, String bearer) throws Exception {
     HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
     connection.setRequestMethod("GET");
     connection.setConnectTimeout(15000);
     connection.setReadTimeout(25000);
-    connection.setRequestProperty("Authorization", "Bearer " + apiKey);
+    connection.setRequestProperty("Authorization", "Bearer " + bearer);
     connection.setRequestProperty("Accept", "application/json");
     int status = connection.getResponseCode();
     if (status == 429 || status >= 500) throw new java.io.IOException("Transient Resend HTTP " + status);

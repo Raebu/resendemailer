@@ -163,20 +163,36 @@ async function saveInboundAttachments(account: MobileAccount, providerEmailId: s
 }
 
 export async function refreshDomains(account: MobileAccount): Promise<number> {
+  // Resend returns the full domain list when no pagination limit is supplied.
+  // Reconcile rather than only upserting so domains removed from Resend disappear
+  // from GIBP sender discovery on the next successful sync.
   const raw = await mobileResend.listDomains(account);
   const items = listEnvelope(raw).data;
+  const seen:string[] = [];
   let count = 0;
+
   for (const d of items) {
-    const name = String(d.name || d.domain || '').toLowerCase();
+    const name = String(d.name || d.domain || '').trim().toLowerCase();
     if (!name) continue;
+    seen.push(name);
     const status = String(d.status || 'unknown');
+    const sending = d.capabilities?.sending ?? d.sending;
+    const receiving = d.capabilities?.receiving ?? d.receiving;
+    const canSend = status === 'verified' && (sending == null || sending === 'enabled');
     await run(
       `INSERT INTO domains(id,account_id,domain,status,can_send,can_receive,created_at)
        VALUES(?,?,?,?,?,?,?)
        ON CONFLICT(account_id,domain) DO UPDATE SET status=excluded.status,can_send=excluded.can_send,can_receive=excluded.can_receive`,
-      [uid('dom_'), account.id, name, status, status === 'verified' ? 1 : 0, d.capabilities?.receiving === 'enabled' || d.receiving === 'enabled' ? 1 : 0, isoNow()],
+      [uid('dom_'), account.id, name, status, canSend ? 1 : 0, receiving === 'enabled' ? 1 : 0, isoNow()],
     );
     count++;
+  }
+
+  if (seen.length) {
+    const placeholders=seen.map(()=>'?').join(',');
+    await run(`DELETE FROM domains WHERE account_id=? AND domain NOT IN (${placeholders})`,[account.id,...seen]);
+  } else {
+    await run('DELETE FROM domains WHERE account_id=?',[account.id]);
   }
   return count;
 }
