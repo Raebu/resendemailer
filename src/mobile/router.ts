@@ -119,7 +119,9 @@ async function addOAuthAccount(callbackUrl:string):Promise<any>{
     await refreshDomains(account);
     return{id,name:grant.name,enabled:true,authMode:'oauth'};
   }catch(error){
-    try{await removeBackgroundAccount(id);}catch{/* best-effort secure cleanup */}
+    // Do not leave a live OAuth grant behind when validation/onboarding fails.
+    try{await revokeBackgroundAccount(id);}
+    catch{try{await removeBackgroundAccount(id);}catch{/* best-effort local cleanup */}}
     throw error;
   }
 }
