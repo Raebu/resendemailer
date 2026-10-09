@@ -96,8 +96,8 @@ jobs:
           TITLE="gibp-mail-events"
           ID="$("$WRANGLER" kv namespace list | jq -r --arg title "$TITLE" '.[] | select(.title == $title) | .id' | head -n1)"
           if [[ -z "$ID" ]]; then
-            OUTPUT="$("$WRANGLER" kv namespace create "$TITLE")"
-            ID="$(printf '%s\n' "$OUTPUT" | sed -n 's/.*id = "\([^"]*\)".*/\1/p' | head -n1)"
+            "$WRANGLER" kv namespace create "$TITLE"
+            ID="$("$WRANGLER" kv namespace list | jq -r --arg title "$TITLE" '.[] | select(.title == $title) | .id' | head -n1)"
           fi
           if [[ -z "$ID" ]]; then
             echo "::error::Unable to resolve/create Cloudflare KV namespace."
