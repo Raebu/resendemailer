@@ -24,6 +24,22 @@ export async function startMobileLifecycle():Promise<void>{
   await App.addListener('appStateChange',state=>{
     if(state.isActive)void sync();
   });
+  await App.addListener('appUrlOpen',event=>{
+    if(!event.url.startsWith('global.gibp.mail://oauth/resend'))return;
+    void (async()=>{
+      try{
+        await mailApi('/api/accounts/oauth/callback',{
+          method:'POST',
+          body:JSON.stringify({url:event.url}),
+        });
+        window.dispatchEvent(new CustomEvent('gibp:resend-connected'));
+        await sync();
+      }catch(error){
+        const message=error instanceof Error?error.message:String(error);
+        window.dispatchEvent(new CustomEvent('gibp:resend-error',{detail:message}));
+      }
+    })();
+  });
   await Network.addListener('networkStatusChange',state=>{
     if(state.connected)void sync();
   });
