@@ -1,6 +1,12 @@
 import { registerPlugin } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
-import type { MobileAccount } from './resend.js';
+
+export type BackgroundAccount={
+  id:string;
+  name:string;
+  api_key?:string;
+  auth_mode?:'api_key'|'oauth'|string;
+};
 
 export type BackgroundAutomationState={
   campaigns:any[];
@@ -18,7 +24,14 @@ export type BackgroundAutomationState={
 
 interface BackgroundMailboxPlugin {
   configureAccount(options:{id:string;name:string;apiKey:string}):Promise<void>;
+  configureOAuthAccount(options:{
+    id:string;name:string;clientId:string;accessToken:string;refreshToken:string;
+    expiresIn:number;scope:string;
+  }):Promise<void>;
+  getBearer(options:{id:string}):Promise<{token:string}>;
+  revokeAccount(options:{id:string}):Promise<void>;
   removeAccount(options:{id:string}):Promise<void>;
+  openExternalUrl(options:{url:string}):Promise<void>;
   configureAutomation(options:{
     url:string;token:string;mode:string;threshold:number;maxRepliesPerHour:number;
   }):Promise<void>;
@@ -32,13 +45,38 @@ interface BackgroundMailboxPlugin {
 }
 const BackgroundMailbox=registerPlugin<BackgroundMailboxPlugin>('BackgroundMailbox');
 
-export async function configureBackgroundAccount(account:MobileAccount):Promise<void>{
+export async function configureBackgroundAccount(account:BackgroundAccount):Promise<void>{
+  if(account.auth_mode==='oauth')return; // OAuth tokens live only in the native Keystore-backed store.
   try{await LocalNotifications.requestPermissions();}catch{/* user may deny notifications */}
-  await BackgroundMailbox.configureAccount({id:account.id,name:account.name,apiKey:account.api_key});
+  await BackgroundMailbox.configureAccount({id:account.id,name:account.name,apiKey:String(account.api_key||'')});
 }
+
+export async function configureBackgroundOAuthAccount(input:{
+  id:string;name:string;clientId:string;accessToken:string;refreshToken:string;
+  expiresIn:number;scope:string;
+}):Promise<void>{
+  try{await LocalNotifications.requestPermissions();}catch{/* user may deny notifications */}
+  await BackgroundMailbox.configureOAuthAccount(input);
+}
+
+export async function getBackgroundBearer(id:string):Promise<string>{
+  const result=await BackgroundMailbox.getBearer({id});
+  if(!result?.token)throw new Error('Resend authorization is unavailable.');
+  return result.token;
+}
+
+export async function revokeBackgroundAccount(id:string):Promise<void>{
+  await BackgroundMailbox.revokeAccount({id});
+}
+
 export async function removeBackgroundAccount(id:string):Promise<void>{
   await BackgroundMailbox.removeAccount({id});
 }
+
+export async function openExternalUrl(url:string):Promise<void>{
+  await BackgroundMailbox.openExternalUrl({url});
+}
+
 export async function configureBackgroundAutomation(input:{
   url:string;token:string;mode:string;threshold:number;maxRepliesPerHour:number;
 }):Promise<void>{
