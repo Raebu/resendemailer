@@ -1,7 +1,9 @@
 package global.gibp.mail;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import androidx.work.Constraints;
 import androidx.work.ExistingPeriodicWorkPolicy;
 import androidx.work.NetworkType;
@@ -42,12 +44,113 @@ public class BackgroundMailboxPlugin extends Plugin {
       JSONObject account = new JSONObject();
       account.put("id", id);
       account.put("name", name == null ? "Resend" : name);
+      account.put("authMode", "api_key");
       account.put("apiKey", apiKey);
       putEncrypted(ACCOUNT_PREFIX + id, account.toString());
       schedule(getContext());
       call.resolve();
     } catch (Exception e) {
       call.reject("Unable to secure background account", e);
+    }
+  }
+
+  @PluginMethod
+  public void configureOAuthAccount(PluginCall call) {
+    String id = call.getString("id");
+    String name = call.getString("name");
+    String clientId = call.getString("clientId");
+    String accessToken = call.getString("accessToken");
+    String refreshToken = call.getString("refreshToken");
+    String scope = call.getString("scope", "full_access");
+    Integer expiresIn = call.getInt("expiresIn", 900);
+
+    if (id == null || clientId == null || clientId.isEmpty() ||
+        accessToken == null || accessToken.isEmpty() ||
+        refreshToken == null || refreshToken.isEmpty()) {
+      call.reject("Complete Resend OAuth credentials are required");
+      return;
+    }
+
+    try {
+      JSONObject account = new JSONObject();
+      account.put("id", id);
+      account.put("name", name == null ? "Resend" : name);
+      account.put("authMode", "oauth");
+      account.put("clientId", clientId);
+      account.put("accessToken", accessToken);
+      account.put("refreshToken", refreshToken);
+      account.put("scope", scope == null ? "full_access" : scope);
+      account.put("tokenExpiresAt", System.currentTimeMillis() + Math.max(60, expiresIn == null ? 900 : expiresIn) * 1000L);
+      putEncrypted(ACCOUNT_PREFIX + id, account.toString());
+      schedule(getContext());
+      call.resolve();
+    } catch (Exception e) {
+      call.reject("Unable to secure Resend OAuth account", e);
+    }
+  }
+
+  @PluginMethod
+  public void getBearer(PluginCall call) {
+    String id = call.getString("id");
+    if (id == null || id.isEmpty()) {
+      call.reject("Account id is required");
+      return;
+    }
+    new Thread(() -> {
+      try {
+        JSONObject account = getEncryptedObject(getContext(), ACCOUNT_PREFIX + id);
+        if (account == null) throw new IllegalStateException("Resend account is not available in secure storage");
+        String token = OAuthTokenManager.bearer(getContext(), account);
+        JSObject result = new JSObject();
+        result.put("token", token);
+        getActivity().runOnUiThread(() -> call.resolve(result));
+      } catch (Exception e) {
+        getActivity().runOnUiThread(() -> call.reject("Unable to authorize Resend account", e));
+      }
+    }).start();
+  }
+
+  @PluginMethod
+  public void revokeAccount(PluginCall call) {
+    String id = call.getString("id");
+    if (id == null || id.isEmpty()) {
+      call.reject("Account id is required");
+      return;
+    }
+    new Thread(() -> {
+      try {
+        JSONObject account = getEncryptedObject(getContext(), ACCOUNT_PREFIX + id);
+        if (account != null) OAuthTokenManager.revoke(getContext(), account);
+        prefs().edit()
+          .remove(ACCOUNT_PREFIX + id)
+          .remove("last_" + id)
+          .apply();
+        getActivity().runOnUiThread(call::resolve);
+      } catch (Exception e) {
+        getActivity().runOnUiThread(() -> call.reject("Unable to revoke Resend authorization", e));
+      }
+    }).start();
+  }
+
+  @PluginMethod
+  public void openExternalUrl(PluginCall call) {
+    String raw = call.getString("url");
+    if (raw == null) {
+      call.reject("URL is required");
+      return;
+    }
+    try {
+      Uri uri = Uri.parse(raw);
+      if (!"https".equalsIgnoreCase(uri.getScheme()) || !"api.resend.com".equalsIgnoreCase(uri.getHost())) {
+        call.reject("Only the Resend OAuth site can be opened");
+        return;
+      }
+      Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+      getContext().startActivity(intent);
+      call.resolve();
+    } catch (Exception e) {
+      call.reject("Unable to open Resend authorization", e);
     }
   }
 
