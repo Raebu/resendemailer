@@ -114,6 +114,11 @@ function safeName(value: string): string {
   return value.replace(/[^a-zA-Z0-9._ -]/g, '_').slice(0, 160) || 'attachment';
 }
 
+function base64Size(value:string):number{
+  const padding=value.endsWith('==')?2:value.endsWith('=')?1:0;
+  return Math.max(0,Math.floor(value.length*3/4)-padding);
+}
+
 async function saveInboundAttachments(account: MobileAccount, providerEmailId: string, localMessageId: string): Promise<void> {
   try {
     const raw = await mobileResend.listReceivedAttachments(account, providerEmailId);
@@ -263,6 +268,8 @@ export async function queueAndSend(input: {
   draftId?: string; localId?: string; from: string; to: string[]; cc?: string[]; bcc?: string[]; subject: string;
   text: string; replyToMessageId?: string | null; attachments?: Array<{ filename: string; contentType?: string; base64: string }>;
 }): Promise<{ id: string; status: string; error?: string }> {
+  const oversized=(input.attachments||[]).find(attachment=>base64Size(attachment.base64)>26_214_400);
+  if(oversized)throw new Error(`${oversized.filename} exceeds the 25 MiB attachment limit`);
   const account = await accountForSender(input.from);
   let parent: any = null;
   if (input.replyToMessageId) parent = await one('SELECT * FROM messages WHERE id=?', [input.replyToMessageId]);

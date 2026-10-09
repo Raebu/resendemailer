@@ -1,6 +1,9 @@
 {
-  "name":"gibp-mail-ai-gateway",
-  "private":true,
-  "type":"module",
-  "devDependencies":{"wrangler":"^4.0.0","typescript":"^5.9.3"}
+  "name": "gibp-mail-ai-gateway",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "wrangler": "4.149.0"
+  }
 }

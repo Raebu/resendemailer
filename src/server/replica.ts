@@ -21,6 +21,7 @@ const draftSchema=z.object({
   id:z.string(),reply_to_message_id:z.string().nullable().optional(),from_identity:z.string(),
   to_json:z.string(),cc_json:z.string(),bcc_json:z.string(),subject:z.string(),text_body:z.string(),
   updated_at:z.string(),created_at:z.string(),revision:z.number().int().nonnegative(),
+  deleted_at:z.string().nullable().optional(),
 });
 const attachmentSchema=z.object({
   id:z.string(),message_id:z.string(),provider_attachment_id:z.string().nullable().optional(),
@@ -107,14 +108,18 @@ function applyMessage(m:z.infer<typeof messageSchema>):void{
 function applyDraft(d:z.infer<typeof draftSchema>):void{
   const state=db.prepare('SELECT revision FROM replica_draft_state WHERE draft_id=?').get(d.id) as {revision:number}|undefined;
   if(state&&state.revision>=d.revision)return;
-  db.prepare(`
-    INSERT INTO drafts(id,reply_to_message_id,from_identity,to_json,cc_json,bcc_json,subject,text_body,updated_at,created_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?)
-    ON CONFLICT(id) DO UPDATE SET
-      reply_to_message_id=excluded.reply_to_message_id,from_identity=excluded.from_identity,
-      to_json=excluded.to_json,cc_json=excluded.cc_json,bcc_json=excluded.bcc_json,
-      subject=excluded.subject,text_body=excluded.text_body,updated_at=excluded.updated_at
-  `).run(d.id,d.reply_to_message_id??null,d.from_identity,d.to_json,d.cc_json,d.bcc_json,d.subject,d.text_body,d.updated_at,d.created_at);
+  if(d.deleted_at){
+    db.prepare('DELETE FROM drafts WHERE id=?').run(d.id);
+  }else{
+    db.prepare(`
+      INSERT INTO drafts(id,reply_to_message_id,from_identity,to_json,cc_json,bcc_json,subject,text_body,updated_at,created_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET
+        reply_to_message_id=excluded.reply_to_message_id,from_identity=excluded.from_identity,
+        to_json=excluded.to_json,cc_json=excluded.cc_json,bcc_json=excluded.bcc_json,
+        subject=excluded.subject,text_body=excluded.text_body,updated_at=excluded.updated_at
+    `).run(d.id,d.reply_to_message_id??null,d.from_identity,d.to_json,d.cc_json,d.bcc_json,d.subject,d.text_body,d.updated_at,d.created_at);
+  }
   db.prepare(`
     INSERT INTO replica_draft_state(draft_id,revision) VALUES(?,?)
     ON CONFLICT(draft_id) DO UPDATE SET revision=excluded.revision
@@ -126,11 +131,13 @@ function applyAttachment(a:z.infer<typeof attachmentSchema>):void{
   const existing=db.prepare('SELECT id,local_path FROM attachments WHERE id=?').get(a.id) as {id:string;local_path:string|null}|undefined;
   let localPath=existing?.local_path??null;
   if(a.content){
-    const dir=path.join(config.dataDir,'attachments',a.message_id);
+    const dir=path.join(config.dataDir,'attachments',safeName(a.message_id));
     fs.mkdirSync(dir,{recursive:true,mode:0o700});
-    const target=path.join(dir,`${a.id}-${safeName(a.filename)}`);
+    const target=path.join(dir,`${safeName(a.id)}-${safeName(a.filename)}`);
     const tmp=target+'.tmp';
-    fs.writeFileSync(tmp,Buffer.from(a.content,'base64'),{mode:0o600});
+    const bytes=Buffer.from(a.content,'base64');
+    if(bytes.length>config.maxAttachmentBytes)throw new Error('Replica attachment exceeds configured size limit');
+    fs.writeFileSync(tmp,bytes,{mode:0o600});
     fs.renameSync(tmp,target);
     localPath=target;
   }

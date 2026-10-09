@@ -22,6 +22,7 @@ if ! grep -q 'androidx.work:work-runtime:2.12.0' "$GRADLE"; then
 fi
 
 MANIFEST="$ANDROID/app/src/main/AndroidManifest.xml"
+sed -i 's/android:allowBackup="true"/android:allowBackup="false"/' "$MANIFEST"
 if ! grep -q 'android.permission.POST_NOTIFICATIONS' "$MANIFEST"; then
   sed -i '/<manifest/a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' "$MANIFEST"
 fi

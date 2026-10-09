@@ -115,11 +115,12 @@ function App() {
   const newCompose=()=>setCompose({from:defaultIdentity,to:'',cc:'',bcc:'',subject:'',text:'',attachments:[],language:'English'});
   const reply=(m:MessageDetail,prefill='')=>{
     const to=m.direction==='inbound'?m.fromAddress:(m.toAddresses[0]||'');
-    const verifiedDomains=new Set(identities.map(i=>i.address.split('@')[1]?.toLowerCase()).filter(Boolean));
+    const accountIdentities=identities.filter(i=>!m.accountId||i.accountId===m.accountId);
+    const verifiedDomains=new Set(accountIdentities.map(i=>i.domain||i.address.split('@')[1]?.toLowerCase()).filter(Boolean));
     const ownAddress=(m.direction==='inbound'
       ? m.toAddresses.find(address=>verifiedDomains.has(address.split('@')[1]?.toLowerCase()))
       : (verifiedDomains.has(m.fromAddress.split('@')[1]?.toLowerCase())?m.fromAddress:undefined)
-    )||defaultIdentity;
+    )||accountIdentities[0]?.address||defaultIdentity;
     setCompose({
       replyToMessageId:m.id, from:ownAddress, to, cc:'', bcc:'',
       subject:/^re:/i.test(m.subject)?m.subject:`Re: ${m.subject}`, text:prefill, attachments:[], language:(m.language&&m.language!=='unknown')?m.language:'English'

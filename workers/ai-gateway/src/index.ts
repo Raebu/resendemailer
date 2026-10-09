@@ -91,10 +91,37 @@ async function structuredFile(env:Env,name:string,schema:any,system:string,input
 
 export default {
   async fetch(request:Request,env:Env):Promise<Response>{
+    const path=new URL(request.url).pathname;
+    const allowedPaths=new Set([
+      '/v1/decision','/v1/intelligence','/v1/language','/v1/search',
+      '/v1/thread-assist','/v1/attachment-summary','/v1/briefing',
+    ]);
+    if(!allowedPaths.has(path))return Response.json({error:'Not found'},{status:404});
     if(request.method!=='POST')return new Response('Method Not Allowed',{status:405});
     if(!env.GIBP_AI_GATEWAY_TOKEN||request.headers.get('authorization')!==`Bearer ${env.GIBP_AI_GATEWAY_TOKEN}`)return Response.json({error:'Unauthorized'},{status:401});
-    let input:any;try{input=await request.json();}catch{return Response.json({error:'Invalid JSON'},{status:400});}
-    const path=new URL(request.url).pathname;
+
+    const maxBytes=path==='/v1/attachment-summary'?16_000_000:65_536;
+    const declaredSize=Number(request.headers.get('content-length')||0);
+    if(Number.isFinite(declaredSize)&&declaredSize>maxBytes)return Response.json({error:'Request is too large'},{status:413});
+    let input:any;
+    try{
+      const reader=request.body?.getReader();
+      if(!reader)throw new Error('Missing body');
+      const decoder=new TextDecoder();
+      let size=0,body='';
+      while(true){
+        const {done,value}=await reader.read();
+        if(done)break;
+        size+=value.byteLength;
+        if(size>maxBytes){
+          await reader.cancel();
+          return Response.json({error:'Request is too large'},{status:413});
+        }
+        body+=decoder.decode(value,{stream:true});
+      }
+      body+=decoder.decode();
+      input=JSON.parse(body);
+    }catch{return Response.json({error:'Invalid JSON'},{status:400});}
 
     if(path==='/v1/decision'){
       if(!['inbound','outreach','followup'].includes(input?.task))return Response.json({error:'Invalid task'},{status:400});
