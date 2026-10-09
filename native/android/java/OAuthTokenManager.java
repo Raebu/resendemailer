@@ -14,6 +14,17 @@ final class OAuthTokenManager {
   private OAuthTokenManager() {}
 
   static synchronized String bearer(Context context, JSONObject account) throws Exception {
+    // Callers can read the encrypted account before they enter this lock. Reload it
+    // here so a preceding refresh's rotating token pair is always observed.
+    String accountId = account.optString("id", "");
+    if (!accountId.isEmpty()) {
+      JSONObject latest = BackgroundMailboxPlugin.getEncryptedObject(
+        context,
+        BackgroundMailboxPlugin.ACCOUNT_PREFIX + accountId
+      );
+      if (latest != null) account = latest;
+    }
+
     String authMode = account.optString("authMode", "api_key");
     if (!"oauth".equals(authMode)) {
       String apiKey = account.optString("apiKey", "");
@@ -44,15 +55,26 @@ final class OAuthTokenManager {
     account.put("tokenExpiresAt", System.currentTimeMillis() + expiresIn * 1000L);
     if (response.has("scope")) account.put("scope", response.optString("scope", account.optString("scope", "full_access")));
 
-    String id = account.optString("id", "");
-    if (!id.isEmpty()) {
-      BackgroundMailboxPlugin.putEncrypted(context, BackgroundMailboxPlugin.ACCOUNT_PREFIX + id, account.toString());
+    if (!accountId.isEmpty()) {
+      BackgroundMailboxPlugin.putEncrypted(
+        context,
+        BackgroundMailboxPlugin.ACCOUNT_PREFIX + accountId,
+        account.toString()
+      );
     }
     return nextAccess;
   }
 
   static synchronized void revoke(Context context, JSONObject account) throws Exception {
     if (account == null) return;
+    String accountId = account.optString("id", "");
+    if (!accountId.isEmpty()) {
+      JSONObject latest = BackgroundMailboxPlugin.getEncryptedObject(
+        context,
+        BackgroundMailboxPlugin.ACCOUNT_PREFIX + accountId
+      );
+      if (latest != null) account = latest;
+    }
     if ("oauth".equals(account.optString("authMode", "api_key"))) {
       String clientId = account.optString("clientId", "");
       String refreshToken = account.optString("refreshToken", "");

@@ -131,11 +131,13 @@ function applyAttachment(a:z.infer<typeof attachmentSchema>):void{
   const existing=db.prepare('SELECT id,local_path FROM attachments WHERE id=?').get(a.id) as {id:string;local_path:string|null}|undefined;
   let localPath=existing?.local_path??null;
   if(a.content){
-    const dir=path.join(config.dataDir,'attachments',a.message_id);
+    const dir=path.join(config.dataDir,'attachments',safeName(a.message_id));
     fs.mkdirSync(dir,{recursive:true,mode:0o700});
-    const target=path.join(dir,`${a.id}-${safeName(a.filename)}`);
+    const target=path.join(dir,`${safeName(a.id)}-${safeName(a.filename)}`);
     const tmp=target+'.tmp';
-    fs.writeFileSync(tmp,Buffer.from(a.content,'base64'),{mode:0o600});
+    const bytes=Buffer.from(a.content,'base64');
+    if(bytes.length>config.maxAttachmentBytes)throw new Error('Replica attachment exceeds configured size limit');
+    fs.writeFileSync(tmp,bytes,{mode:0o600});
     fs.renameSync(tmp,target);
     localPath=target;
   }
