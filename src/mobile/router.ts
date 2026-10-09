@@ -15,7 +15,7 @@ const parseBody=(init:RequestInit):any=>{
   return init.body||{};
 };
 const toSummary=(r:any)=>({
-  id:r.id,threadId:r.thread_id,providerId:r.provider_id,direction:r.direction,status:r.status,
+  id:r.id,accountId:r.account_id||null,threadId:r.thread_id,providerId:r.provider_id,direction:r.direction,status:r.status,
   fromAddress:r.from_address,fromName:r.from_name,toAddresses:json(r.to_json,[]),ccAddresses:json(r.cc_json,[]),
   subject:r.subject,preview:r.preview,createdAt:r.created_at,receivedAt:r.received_at,sentAt:r.sent_at,
   isRead:Boolean(r.is_read),isStarred:Boolean(r.is_starred),isArchived:Boolean(r.is_archived),deletedAt:r.deleted_at,
@@ -155,12 +155,12 @@ async function importBackgroundAutomationState():Promise<void>{
       localMessageId=hit.id;
     }
     await run(
-      `INSERT OR IGNORE INTO automation_audit(id,message_id,campaign_id,action,decision_json,executed,error,created_at)
-       VALUES(?,?,?,?,?,?,?,?)`,
+      `INSERT OR IGNORE INTO automation_audit(id,message_id,campaign_id,action,decision_json,executed,error,created_at,send_id)
+       VALUES(?,?,?,?,?,?,?,?,?)`,
       [
         entry.id,localMessageId,entry.campaignId||null,String(entry.action),
         JSON.stringify({source:'android-background',action:entry.action}),
-        entry.executed?1:0,entry.error||null,String(entry.createdAt),
+        entry.executed?1:0,entry.error||null,String(entry.createdAt),entry.sendId||null,
       ],
     );
   }
@@ -219,12 +219,12 @@ async function syncSuppressionsToBackground():Promise<void>{
 
 async function syncForegroundAuditToBackground():Promise<void>{
   const rows=await all<any>(
-    "SELECT id,campaign_id,action,executed,created_at FROM automation_audit WHERE executed=1 AND action='create_outreach' AND created_at>=datetime('now','-1 day') ORDER BY created_at"
+    "SELECT id,campaign_id,action,executed,created_at,send_id FROM automation_audit WHERE executed=1 AND action IN ('create_outreach','send_reply') AND created_at>=datetime('now','-1 day') ORDER BY created_at"
   );
   try{
     await setBackgroundForegroundAudit(rows.map(row=>({
       id:row.id,campaignId:row.campaign_id||null,action:row.action,
-      executed:Boolean(row.executed),createdAt:row.created_at,
+      executed:Boolean(row.executed),createdAt:row.created_at,sendId:row.send_id||null,
     })));
   }catch{/* foreground audit remains authoritative */}
 }
@@ -343,22 +343,27 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
     vals.push(id);await run(`UPDATE messages SET ${sets.join(',')} WHERE id=?`,vals);return {ok:true} as T;
   }
   if(path==='/api/drafts'&&method==='GET'){
-    const rows=await all<any>('SELECT * FROM drafts ORDER BY updated_at DESC');
+    const rows=await all<any>('SELECT * FROM drafts WHERE deleted_at IS NULL ORDER BY updated_at DESC');
     return rows.map(r=>({id:r.id,replyToMessageId:r.reply_to_message_id,fromIdentity:r.from_identity,to:json(r.to_json,[]),cc:json(r.cc_json,[]),bcc:json(r.bcc_json,[]),subject:r.subject,textBody:r.text_body,updatedAt:r.updated_at})) as T;
   }
   if(path==='/api/drafts'&&method==='POST'){
     const id=body.id||uid('draft_'),now=isoNow(),rev=await nextRevision();
     await run(`
-      INSERT INTO drafts(id,reply_to_message_id,from_identity,to_json,cc_json,bcc_json,subject,text_body,updated_at,created_at,revision)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?)
+      INSERT INTO drafts(id,reply_to_message_id,from_identity,to_json,cc_json,bcc_json,subject,text_body,updated_at,created_at,revision,deleted_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET reply_to_message_id=excluded.reply_to_message_id,from_identity=excluded.from_identity,
       to_json=excluded.to_json,cc_json=excluded.cc_json,bcc_json=excluded.bcc_json,subject=excluded.subject,
-      text_body=excluded.text_body,updated_at=excluded.updated_at,revision=excluded.revision`,
+      text_body=excluded.text_body,updated_at=excluded.updated_at,revision=excluded.revision,deleted_at=NULL`,
       [id,body.replyToMessageId||null,body.fromIdentity||'',JSON.stringify(body.to||[]),JSON.stringify(body.cc||[]),
-       JSON.stringify(body.bcc||[]),body.subject||'',body.textBody||'',now,now,rev]);
+       JSON.stringify(body.bcc||[]),body.subject||'',body.textBody||'',now,now,rev,null]);
     return{id} as T;
   }
-  if(path.startsWith('/api/drafts/')&&method==='DELETE'){await run('DELETE FROM drafts WHERE id=?',[decodeURIComponent(path.split('/').pop()!)]);return{ok:true} as T;}
+  if(path.startsWith('/api/drafts/')&&method==='DELETE'){
+    const id=decodeURIComponent(path.split('/').pop()!);
+    const deletedAt=isoNow();
+    await run('UPDATE drafts SET deleted_at=?,updated_at=?,revision=? WHERE id=?',[deletedAt,deletedAt,await nextRevision(),id]);
+    return{ok:true} as T;
+  }
   if(path==='/api/send'&&method==='POST'){
     const payload=await decorateOutgoing(body);
     const undo=Math.max(0,Math.min(30,Number(body.undoSeconds||0)));
@@ -466,6 +471,8 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
 
   if(path==='/api/ai/config'&&method==='POST'){
     const url=String(body.url||'').trim(), token=String(body.token||'').trim();
+    if(!/^https:\/\//i.test(url))throw new Error('AI gateway must use HTTPS');
+    if(token.length<12)throw new Error('AI gateway bearer token must be at least 12 characters');
     await configureAi(url,token);
     const rule=await one<any>("SELECT * FROM automation_rules WHERE enabled=1 ORDER BY created_at LIMIT 1");
     await configureBackgroundAutomation({
@@ -519,8 +526,12 @@ export async function mobileRequest<T=any>(rawUrl:string,init:RequestInit={}):Pr
 
   if(path==='/api/replicas'&&method==='GET')return await all<any>('SELECT id,name,url,enabled,last_revision,last_sync_at,last_error FROM replica_targets ORDER BY name') as T;
   if(path==='/api/replicas'&&method==='POST'){
+    const replicaUrl=String(body.url||'').replace(/\/$/,'');
+    const replicaToken=String(body.token||'');
+    if(!/^https:\/\//i.test(replicaUrl))throw new Error('Replica target must use HTTPS');
+    if(replicaToken.length<24)throw new Error('Replica bearer token must be at least 24 characters');
     const id=uid('rep_');await run('INSERT INTO replica_targets(id,name,url,token,enabled,last_revision) VALUES(?,?,?,?,1,0)',
-      [id,String(body.name||'PC'),String(body.url||'').replace(/\/$/,''),String(body.token||'')]);return{id} as T;
+      [id,String(body.name||'PC'),replicaUrl,replicaToken]);return{id} as T;
   }
   const repPush=path.match(/^\/api\/replicas\/([^/]+)\/push$/);
   if(repPush&&method==='POST')return await pushReplicaTarget(decodeURIComponent(repPush[1])) as T;

@@ -15,7 +15,10 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import java.time.Instant;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -29,7 +32,9 @@ public class BackgroundMailboxPlugin extends Plugin {
   static final String SUPPRESSIONS_KEY = "suppressions";
   static final String AUDIT_KEY = "audit";
   static final String FOREGROUND_AUDIT_KEY = "foreground_audit";
+  static final String SEND_RESERVATIONS_KEY = "send_reservations";
   static final String PERIODIC_NAME = "gibp_mail_background_periodic";
+  private static final Object SEND_RESERVATION_LOCK = new Object();
 
   @PluginMethod
   public void configureAccount(PluginCall call) {
@@ -238,6 +243,41 @@ public class BackgroundMailboxPlugin extends Plugin {
   }
 
   @PluginMethod
+  public void reserveAutomatedSend(PluginCall call) {
+    String sendId = call.getString("sendId");
+    String kind = call.getString("kind");
+    String campaignId = call.getString("campaignId", "");
+    Integer requestedLimit = call.getInt("limit", 25);
+    if (sendId == null || sendId.isEmpty() || !("campaign".equals(kind) || "reply".equals(kind))) {
+      call.reject("A valid automated send identity and kind are required");
+      return;
+    }
+    try {
+      int limit = Math.max(1, Math.min(25, requestedLimit == null ? 25 : requestedLimit));
+      JSObject result = new JSObject();
+      result.put("allowed", reserveAutomatedSend(getContext(), sendId, kind, campaignId, limit));
+      call.resolve(result);
+    } catch (Exception e) {
+      call.reject("Unable to reserve automated send", e);
+    }
+  }
+
+  @PluginMethod
+  public void releaseAutomatedSend(PluginCall call) {
+    String sendId = call.getString("sendId");
+    if (sendId == null || sendId.isEmpty()) {
+      call.reject("Automated send identity is required");
+      return;
+    }
+    try {
+      releaseAutomatedSend(getContext(), sendId);
+      call.resolve();
+    } catch (Exception e) {
+      call.reject("Unable to release automated send", e);
+    }
+  }
+
+  @PluginMethod
   public void upsertCampaign(PluginCall call) {
     String id = call.getString("id");
     String campaignJson = call.getString("campaignJson");
@@ -359,6 +399,82 @@ public class BackgroundMailboxPlugin extends Plugin {
     String encrypted = prefs(context).getString(key, null);
     if (encrypted == null) return null;
     return new JSONArray(CryptoBox.decrypt(encrypted));
+  }
+
+  static boolean reserveAutomatedSend(
+    Context context,
+    String sendId,
+    String kind,
+    String campaignId,
+    int limit
+  ) throws Exception {
+    synchronized (SEND_RESERVATION_LOCK) {
+      long cutoff = System.currentTimeMillis() - 3_600_000L;
+      String wantedAction = "campaign".equals(kind) ? "create_outreach" : "send_reply";
+      Set<String> seen = new HashSet<>();
+      int count = 0;
+
+      String[] auditKeys = { AUDIT_KEY, FOREGROUND_AUDIT_KEY };
+      for (String auditKey : auditKeys) {
+        JSONArray audit = getEncryptedArray(context, auditKey);
+        if (audit == null) continue;
+        for (int i = 0; i < audit.length(); i++) {
+          JSONObject row = audit.optJSONObject(i);
+          if (row == null || !row.optBoolean("executed", false)) continue;
+          if (!wantedAction.equals(row.optString("action", ""))) continue;
+          if (parseTime(row.optString("createdAt", "")) < cutoff) continue;
+          String logicalId = row.optString("sendId", row.optString("id", auditKey + ":" + i));
+          if (sendId.equals(logicalId)) return false;
+          if (seen.add(kind + ":" + logicalId)) count++;
+        }
+      }
+
+      JSONArray reservations = getEncryptedArray(context, SEND_RESERVATIONS_KEY);
+      if (reservations == null) reservations = new JSONArray();
+      JSONArray active = new JSONArray();
+      boolean duplicate = false;
+      for (int i = 0; i < reservations.length(); i++) {
+        JSONObject row = reservations.optJSONObject(i);
+        if (row == null || parseTime(row.optString("createdAt", "")) < cutoff) continue;
+        active.put(row);
+        String rowKind = row.optString("kind", "");
+        String logicalId = row.optString("sendId", "");
+        if (sendId.equals(logicalId)) duplicate = true;
+        if (kind.equals(rowKind) && seen.add(kind + ":" + logicalId)) count++;
+      }
+      if (duplicate || count >= limit) {
+        putEncrypted(context, SEND_RESERVATIONS_KEY, active.toString());
+        return false;
+      }
+
+      active.put(new JSONObject()
+        .put("sendId", sendId)
+        .put("kind", kind)
+        .put("campaignId", campaignId == null ? "" : campaignId)
+        .put("createdAt", Instant.now().toString()));
+      while (active.length() > 200) active.remove(0);
+      putEncrypted(context, SEND_RESERVATIONS_KEY, active.toString());
+      return true;
+    }
+  }
+
+  static void releaseAutomatedSend(Context context, String sendId) throws Exception {
+    synchronized (SEND_RESERVATION_LOCK) {
+      JSONArray reservations = getEncryptedArray(context, SEND_RESERVATIONS_KEY);
+      if (reservations == null) return;
+      JSONArray kept = new JSONArray();
+      for (int i = 0; i < reservations.length(); i++) {
+        JSONObject row = reservations.optJSONObject(i);
+        if (row != null && !sendId.equals(row.optString("sendId", ""))) kept.put(row);
+      }
+      putEncrypted(context, SEND_RESERVATIONS_KEY, kept.toString());
+    }
+  }
+
+  private static long parseTime(String value) {
+    if (value == null || value.isEmpty()) return 0L;
+    try { return Instant.parse(value).toEpochMilli(); }
+    catch (Exception ignored) { return 0L; }
   }
 
   private JSONArray getEncryptedArray(String key) throws Exception {

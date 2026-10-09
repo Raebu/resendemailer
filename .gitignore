@@ -2,6 +2,9 @@ node_modules/
 dist/
 .env
 .env.local
+.env.*
+.dev.vars
+.dev.vars.*
 *.log
 .DS_Store
 data/
@@ -9,3 +12,4 @@ backups/
 android/
 workers/**/node_modules/
 workers/**/.wrangler/
+workers/**/dist/

@@ -2,6 +2,8 @@ import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from '@cap
 
 const sqlite = new SQLiteConnection(CapacitorSQLite);
 let connection: SQLiteDBConnection | null = null;
+let connectionPromise: Promise<SQLiteDBConnection> | null = null;
+let revisionQueue: Promise<void> = Promise.resolve();
 
 function createSecret(): string {
   const bytes = new Uint8Array(32);
@@ -51,7 +53,8 @@ CREATE TABLE IF NOT EXISTS drafts (
   from_identity TEXT NOT NULL DEFAULT '', to_json TEXT NOT NULL DEFAULT '[]',
   cc_json TEXT NOT NULL DEFAULT '[]', bcc_json TEXT NOT NULL DEFAULT '[]',
   subject TEXT NOT NULL DEFAULT '', text_body TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL, created_at TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0
+  updated_at TEXT NOT NULL, created_at TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT
 );
 CREATE TABLE IF NOT EXISTS suppressions (
   email TEXT PRIMARY KEY, reason TEXT NOT NULL DEFAULT 'manual', created_at TEXT NOT NULL
@@ -76,7 +79,8 @@ CREATE TABLE IF NOT EXISTS automation_rules (
 );
 CREATE TABLE IF NOT EXISTS automation_audit (
   id TEXT PRIMARY KEY, message_id TEXT, campaign_id TEXT, action TEXT NOT NULL,
-  decision_json TEXT NOT NULL, executed INTEGER NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL
+  decision_json TEXT NOT NULL, executed INTEGER NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL,
+  send_id TEXT
 );
 CREATE TABLE IF NOT EXISTS aliases (
   id TEXT PRIMARY KEY,
@@ -227,26 +231,41 @@ CREATE TABLE IF NOT EXISTS replica_targets (
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `;
 
-export async function mobileDb(): Promise<SQLiteDBConnection> {
-  if (connection) return connection;
+async function ensureColumn(db: SQLiteDBConnection, table: string, column: string, definition: string): Promise<void> {
+  const info = await db.query(`PRAGMA table_info(${table})`);
+  if (!(info.values || []).some((row: any) => row.name === column)) {
+    await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+async function initializeMobileDb(): Promise<SQLiteDBConnection> {
   const stored = await sqlite.isSecretStored();
   if (!stored.result) await sqlite.setEncryptionSecret(createSecret());
   const existing = await sqlite.isConnection('gibp_mail', false);
-  connection = existing.result
+  const db = existing.result
     ? await sqlite.retrieveConnection('gibp_mail', false)
     : await sqlite.createConnection('gibp_mail', true, 'secret', 1, false);
-  await connection.open();
-  await connection.execute(schema);
+  await db.open();
+  await db.execute(schema);
+  // Existing installations predate OAuth and retain their API-key accounts unchanged.
+  await ensureColumn(db, 'accounts', 'auth_mode', "TEXT NOT NULL DEFAULT 'api_key'");
+  await ensureColumn(db, 'accounts', 'oauth_client_id', 'TEXT');
+  await ensureColumn(db, 'accounts', 'oauth_scope', 'TEXT');
+  await ensureColumn(db, 'drafts', 'deleted_at', 'TEXT');
+  await ensureColumn(db, 'automation_audit', 'send_id', 'TEXT');
+  connection = db;
+  return db;
+}
 
-  // Backward-compatible account migration. Existing installations predate OAuth and
-  // retain their API-key accounts unchanged.
-  const accountColumns = await connection.query('PRAGMA table_info(accounts)');
-  const names = new Set((accountColumns.values || []).map((row: any) => String(row.name)));
-  if (!names.has('auth_mode')) await connection.execute("ALTER TABLE accounts ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'api_key'");
-  if (!names.has('oauth_client_id')) await connection.execute('ALTER TABLE accounts ADD COLUMN oauth_client_id TEXT');
-  if (!names.has('oauth_scope')) await connection.execute('ALTER TABLE accounts ADD COLUMN oauth_scope TEXT');
-
-  return connection;
+export async function mobileDb(): Promise<SQLiteDBConnection> {
+  if (connection) return connection;
+  if (!connectionPromise) connectionPromise = initializeMobileDb();
+  try {
+    return await connectionPromise;
+  } catch (error) {
+    connectionPromise = null;
+    throw error;
+  }
 }
 
 export async function all<T = any>(statement: string, values: any[] = []): Promise<T[]> {
@@ -262,10 +281,18 @@ export async function run(statement: string, values: any[] = []): Promise<void> 
   await db.run(statement, values);
 }
 export async function nextRevision(): Promise<number> {
-  const row = await one<{ value: string }>('SELECT value FROM settings WHERE key=?', ['revision']);
-  const value = Number(row?.value || 0) + 1;
-  await run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', ['revision', String(value)]);
-  return value;
+  let release!: () => void;
+  const previous = revisionQueue;
+  revisionQueue = new Promise<void>(resolve => { release = resolve; });
+  await previous;
+  try {
+    const row = await one<{ value: string }>('SELECT value FROM settings WHERE key=?', ['revision']);
+    const value = Number(row?.value || 0) + 1;
+    await run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', ['revision', String(value)]);
+    return value;
+  } finally {
+    release();
+  }
 }
 export function uid(prefix = ''): string { return prefix + crypto.randomUUID(); }
 export const isoNow = () => new Date().toISOString();

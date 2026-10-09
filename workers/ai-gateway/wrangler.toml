@@ -1,9 +1,12 @@
 name = "gibp-mail-ai-gateway"
 main = "src/index.ts"
-compatibility_date = "2026-09-01"
+compatibility_date = "2026-10-04"
 
 [vars]
 OPENAI_MODEL = "gpt-5.6-luna"
+
+[secrets]
+required = ["OPENAI_API_KEY", "GIBP_AI_GATEWAY_TOKEN"]
 
 # Set secrets with:
 #   npx wrangler secret put OPENAI_API_KEY

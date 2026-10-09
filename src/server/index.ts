@@ -230,6 +230,12 @@ app.post('/api/send', async (req, res) => {
   const input = sendSchema.parse(req.body);
   const identityAllowed = identities.some(i => i.address.toLowerCase() === input.from.toLowerCase());
   if (!identityAllowed) return res.status(400).json({ error:'From address is not in GIBP_MAIL_IDENTITIES' });
+  const decodedAttachments = input.attachments.map(attachment => ({
+    ...attachment,
+    bytes: Buffer.from(attachment.base64, 'base64'),
+  }));
+  const oversized = decodedAttachments.find(attachment => attachment.bytes.length > config.maxAttachmentBytes);
+  if (oversized) return res.status(413).json({error:`${oversized.filename} exceeds attachment limit`});
 
   let inReplyTo: string | null = null;
   let references: string[] = [];
@@ -258,19 +264,17 @@ app.post('/api/send', async (req, res) => {
     inReplyTo,JSON.stringify(references),createdAt);
   touchThread(threadId,input.subject,createdAt);
 
-  if (input.attachments.length) {
+  if (decodedAttachments.length) {
     const dir = path.join(config.dataDir,'attachments',id);
     fs.mkdirSync(dir,{recursive:true,mode:0o700});
-    for (const a of input.attachments) {
-      const bytes = Buffer.from(a.base64,'base64');
-      if (bytes.length > config.maxAttachmentBytes) return res.status(413).json({error:`${a.filename} exceeds attachment limit`});
+    for (const a of decodedAttachments) {
       const safe = a.filename.replace(/[^a-zA-Z0-9._ -]/g,'_').slice(0,180);
       const target = path.join(dir,`${newId()}-${safe}`);
-      fs.writeFileSync(target,bytes,{mode:0o600});
+      fs.writeFileSync(target,a.bytes,{mode:0o600});
       db.prepare(`
         INSERT INTO attachments(id,message_id,filename,content_type,size_bytes,local_path,created_at)
         VALUES(?,?,?,?,?,?,?)
-      `).run(newId(),id,a.filename,a.contentType,bytes.length,target,now());
+      `).run(newId(),id,a.filename,a.contentType,a.bytes.length,target,now());
     }
   }
 

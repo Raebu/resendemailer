@@ -265,13 +265,24 @@ public class MailSyncWorker extends Worker {
 
     String bearer = OAuthTokenManager.bearer(context, account);
     String localId = message.optString("id", UUID.randomUUID().toString());
-    postJson(
-      "https://api.resend.com/emails",
-      bearer,
-      send,
-      "gibp-mobile-reply_" + account.optString("id", "") + "_" + localId
-    );
-    appendAudit(audit(localId, null, "send_reply", true, ""));
+    String sendId = "reply_" + account.optString("id", "") + "_" + localId;
+    int replyLimit = Math.max(1, Math.min(25, automation.optInt("maxRepliesPerHour", 10)));
+    if (!BackgroundMailboxPlugin.reserveAutomatedSend(context, sendId, "reply", "", replyLimit)) {
+      appendAudit(audit(localId, null, "send_reply", false, "Rate limit or duplicate send reservation", sendId));
+      return;
+    }
+    try {
+      postJson(
+        "https://api.resend.com/emails",
+        bearer,
+        send,
+        "gibp-mobile-" + sendId
+      );
+    } catch (Exception e) {
+      BackgroundMailboxPlugin.releaseAutomatedSend(context, sendId);
+      throw e;
+    }
+    appendAudit(audit(localId, null, "send_reply", true, "", sendId));
   }
 
   private void reconcileCampaignReplies(JSONObject message) throws Exception {
@@ -408,12 +419,22 @@ public class MailSyncWorker extends Worker {
           .put("text", text);
 
         String contactId = contact.optString("id", UUID.randomUUID().toString());
-        postJson(
-          "https://api.resend.com/emails",
-          OAuthTokenManager.bearer(context, account),
-          send,
-          "gibp-mobile-bd_" + campaign.optString("id", "") + "_" + contactId + "_" + step
-        );
+        String sendId = "bd_" + campaign.optString("id", "") + "_" + contactId + "_" + step;
+        if (!BackgroundMailboxPlugin.reserveAutomatedSend(context, sendId, "campaign", campaignIdForRate, GLOBAL_BD_PER_HOUR)) {
+          appendAudit(audit(null, campaign.optString("id", ""), "create_outreach", false, "Rate limit or duplicate send reservation", sendId));
+          continue;
+        }
+        try {
+          postJson(
+            "https://api.resend.com/emails",
+            OAuthTokenManager.bearer(context, account),
+            send,
+            "gibp-mobile-" + sendId
+          );
+        } catch (Exception e) {
+          BackgroundMailboxPlugin.releaseAutomatedSend(context, sendId);
+          throw e;
+        }
 
         String sentAt = Instant.now().toString();
         JSONArray sendTimes = contact.optJSONArray("sendTimes");
@@ -432,7 +453,7 @@ public class MailSyncWorker extends Worker {
         ).toString());
         contact.put("updatedAt", sentAt);
 
-        appendAudit(audit(null, campaign.optString("id", ""), "create_outreach", true, ""));
+        appendAudit(audit(null, campaign.optString("id", ""), "create_outreach", true, "", sendId));
         changed = true;
         budget--;
         perHour++;
@@ -599,6 +620,10 @@ public class MailSyncWorker extends Worker {
   }
 
   private JSONObject audit(String messageId, String campaignId, String action, boolean executed, String error) {
+    return audit(messageId, campaignId, action, executed, error, null);
+  }
+
+  private JSONObject audit(String messageId, String campaignId, String action, boolean executed, String error, String sendId) {
     JSONObject row = new JSONObject();
     try {
       row.put("id", "bg_" + UUID.randomUUID());
@@ -608,6 +633,7 @@ public class MailSyncWorker extends Worker {
       row.put("executed", executed);
       row.put("error", error == null || error.isEmpty() ? JSONObject.NULL : error);
       row.put("createdAt", Instant.now().toString());
+      row.put("sendId", sendId == null || sendId.isEmpty() ? JSONObject.NULL : sendId);
     } catch (Exception ignored) {}
     return row;
   }
@@ -650,7 +676,7 @@ public class MailSyncWorker extends Worker {
         if (!"create_outreach".equals(row.optString("action", ""))) continue;
         if (campaignId != null && !campaignId.equals(row.optString("campaignId", ""))) continue;
         if (parseTime(row.optString("createdAt", "")) < cutoff) continue;
-        String id = row.optString("id", "");
+        String id = row.optString("sendId", row.optString("id", ""));
         if (id.isEmpty()) id = key + ":" + i + ":" + row.optString("createdAt", "");
         if (seen.add(id)) count++;
       }

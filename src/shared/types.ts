@@ -4,10 +4,13 @@ export interface Identity {
   name: string;
   address: string;
   formatted: string;
+  accountId?: string;
+  domain?: string;
 }
 
 export interface MessageSummary {
   id: string;
+  accountId?: string | null;
   threadId: string;
   providerId: string | null;
   direction: 'inbound' | 'outbound';

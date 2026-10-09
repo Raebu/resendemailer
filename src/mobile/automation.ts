@@ -2,6 +2,7 @@ import { CapacitorHttp } from '@capacitor/core';
 import { all, isoNow, json, nextRevision, one, run, uid } from './db.js';
 import { queueAndSend } from './sync.js';
 import { AUTO_SAFE_CATEGORIES, autoReplyLocalId, campaignSendLocalId, campaignWithinGlobalHourlyCap, canAutoSend, containsStopLanguage } from '../shared/policy.js';
+import { releaseBackgroundAutomatedSend, reserveBackgroundAutomatedSend } from './background.js';
 
 export type AutomationAction =
   | 'no_action' | 'draft_reply' | 'send_reply' | 'schedule_followup'
@@ -41,12 +42,12 @@ async function gateway(task: 'inbound'|'outreach'|'followup', payload: any): Pro
 }
 
 async function audit(input: {
-  messageId?: string; campaignId?: string; decision: AutomationDecision; executed: boolean; error?: string;
+  messageId?: string; campaignId?: string; sendId?: string; decision: AutomationDecision; executed: boolean; error?: string;
 }): Promise<void> {
   await run(
-    'INSERT INTO automation_audit(id,message_id,campaign_id,action,decision_json,executed,error,created_at) VALUES(?,?,?,?,?,?,?,?)',
+    'INSERT INTO automation_audit(id,message_id,campaign_id,action,decision_json,executed,error,created_at,send_id) VALUES(?,?,?,?,?,?,?,?,?)',
     [uid('audit_'), input.messageId || null, input.campaignId || null, input.decision.action,
-      JSON.stringify(input.decision), input.executed ? 1 : 0, input.error || null, isoNow()],
+      JSON.stringify(input.decision), input.executed ? 1 : 0, input.error || null, isoNow(), input.sendId || null],
   );
 }
 
@@ -145,12 +146,19 @@ export async function evaluateInbound(messageId: string, modeOverride?: string |
   });
 
   if (autoAllowed && decision.body.trim()) {
+    const providerKey=String(message.provider_id||message.id);
+    const sendId=autoReplyLocalId(message.account_id,providerKey);
     try {
+      if(!await reserveBackgroundAutomatedSend({
+        sendId,kind:'reply',limit:Number(rule.max_auto_replies_per_hour||10),
+      })){
+        await audit({messageId,sendId,decision,executed:false,error:'Automation rate limit or duplicate send reservation'});
+        return decision;
+      }
       const replyFrom=await verifiedReplyFrom(message);
       if(!replyFrom) throw new Error('No verified local recipient address is available for autonomous reply');
-      const providerKey=String(message.provider_id||message.id);
       const result = await queueAndSend({
-        localId:autoReplyLocalId(message.account_id,providerKey),
+        localId:sendId,
         from: replyFrom,
         to: [sender],
         subject: decision.subject || (/^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`),
@@ -158,10 +166,12 @@ export async function evaluateInbound(messageId: string, modeOverride?: string |
         replyToMessageId: message.id,
       });
       const executed = result.status === 'sent' || result.status === 'queued';
-      await audit({messageId,decision,executed,error:result.error});
+      if(!executed)await releaseBackgroundAutomatedSend(sendId);
+      await audit({messageId,sendId,decision,executed,error:result.error});
       return decision;
     } catch (e) {
-      await audit({messageId,decision,executed:false,error:e instanceof Error?e.message:String(e)});
+      await releaseBackgroundAutomatedSend(sendId).catch(()=>undefined);
+      await audit({messageId,sendId,decision,executed:false,error:e instanceof Error?e.message:String(e)});
       return decision;
     }
   }
@@ -265,15 +275,38 @@ export async function runCampaignTick(campaignId?: string): Promise<{ attempted:
     }
 
     decision.action='create_outreach';
-    const result = await queueAndSend({
-      localId:campaignSendLocalId(campaign.id,contact.id,Number(contact.step||0)),
-      from:campaign.from_address,
-      to:[contact.email],
-      subject:decision.subject || campaign.name,
-      text:decision.body,
-    });
+    const sendId=campaignSendLocalId(campaign.id,contact.id,Number(contact.step||0));
+    let reserved=false;
+    try{
+      reserved=await reserveBackgroundAutomatedSend({sendId,kind:'campaign',campaignId:campaign.id,limit:25});
+    }catch(e){
+      await audit({campaignId:campaign.id,sendId,decision,executed:false,error:`Unable to reserve global send slot: ${String(e)}`});
+      skipped++;
+      continue;
+    }
+    if(!reserved){
+      await audit({campaignId:campaign.id,sendId,decision,executed:false,error:'Global campaign rate limit or duplicate send reservation'});
+      skipped++;
+      continue;
+    }
+    let result:{id:string;status:string;error?:string};
+    try{
+      result = await queueAndSend({
+        localId:sendId,
+        from:campaign.from_address,
+        to:[contact.email],
+        subject:decision.subject || campaign.name,
+        text:decision.body,
+      });
+    }catch(e){
+      await releaseBackgroundAutomatedSend(sendId).catch(()=>undefined);
+      await audit({campaignId:campaign.id,sendId,decision,executed:false,error:e instanceof Error?e.message:String(e)});
+      skipped++;
+      continue;
+    }
     const executed=result.status==='sent'||result.status==='queued';
-    await audit({campaignId:campaign.id,decision,executed,error:result.error});
+    if(!executed)await releaseBackgroundAutomatedSend(sendId).catch(()=>undefined);
+    await audit({campaignId:campaign.id,sendId,decision,executed,error:result.error});
     if (executed) {
       const days=Math.max(1,Math.min(14,decision.follow_up_days||campaign.followup_days||3));
       const next=new Date(Date.now()+days*86400000).toISOString();

@@ -19,6 +19,7 @@ export type BackgroundAutomationState={
     executed:boolean;
     error?:string|null;
     createdAt:string;
+    sendId?:string|null;
   }>;
 };
 
@@ -38,6 +39,8 @@ interface BackgroundMailboxPlugin {
   setAutomationMode(options:{mode:string;threshold:number;maxRepliesPerHour:number}):Promise<void>;
   setSuppressions(options:{suppressionsJson:string}):Promise<void>;
   setForegroundAudit(options:{auditJson:string}):Promise<void>;
+  reserveAutomatedSend(options:{sendId:string;kind:'campaign'|'reply';campaignId?:string;limit:number}):Promise<{allowed:boolean}>;
+  releaseAutomatedSend(options:{sendId:string}):Promise<void>;
   upsertCampaign(options:{id:string;campaignJson:string}):Promise<void>;
   removeCampaign(options:{id:string}):Promise<void>;
   getAutomationState():Promise<BackgroundAutomationState>;
@@ -92,6 +95,14 @@ export async function setBackgroundSuppressions(emails:string[]):Promise<void>{
 }
 export async function setBackgroundForegroundAudit(audit:any[]):Promise<void>{
   await BackgroundMailbox.setForegroundAudit({auditJson:JSON.stringify(audit)});
+}
+export async function reserveBackgroundAutomatedSend(input:{
+  sendId:string;kind:'campaign'|'reply';campaignId?:string;limit:number;
+}):Promise<boolean>{
+  return (await BackgroundMailbox.reserveAutomatedSend(input)).allowed;
+}
+export async function releaseBackgroundAutomatedSend(sendId:string):Promise<void>{
+  await BackgroundMailbox.releaseAutomatedSend({sendId});
 }
 export async function upsertBackgroundCampaign(id:string,campaign:any):Promise<void>{
   await BackgroundMailbox.upsertCampaign({id,campaignJson:JSON.stringify(campaign)});

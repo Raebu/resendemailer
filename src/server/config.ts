@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 const raw = z.object({
   RESEND_API_KEY: z.string().min(1).optional(),
-  GIBP_MAIL_HOST: z.string().default('127.0.0.1'),
+  GIBP_MAIL_HOST: z.enum(['127.0.0.1', '::1', 'localhost']).default('127.0.0.1'),
   GIBP_MAIL_PORT: z.coerce.number().int().positive().default(8768),
   GIBP_MAIL_DATA_DIR: z.string().default('~/.local/share/gibp-mail'),
   GIBP_MAIL_IDENTITIES: z.string().default('GIBP <hello@gibp.app>,GIBP Global <hello@gibp.global>'),
